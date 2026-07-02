@@ -239,7 +239,7 @@ class CaptureProcess:
 
         LOGGER.info("Stopping FFmpeg")
         if os.name == "nt":
-            self.process.send_signal(signal.CTRL_BREAK_EVENT)
+            self.process.terminate()
         else:
             self.process.terminate()
         try:
@@ -331,7 +331,7 @@ class CaptureProcess:
             "0:v:0",
             "-an",
             "-vf",
-            f"fps={self.settings.live_fps}",
+            f"fps={self.settings.live_fps},scale={self.settings.live_width}:-2",
             "-q:v",
             str(self.settings.live_jpeg_quality),
             "-f",
@@ -394,6 +394,8 @@ class CaptureProcess:
             return [
                 "-f",
                 "dshow",
+                "-rtbufsize",
+                self.settings.dshow_rtbufsize,
                 "-video_size",
                 self.settings.video_resolution,
                 "-framerate",

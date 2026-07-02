@@ -37,8 +37,10 @@ class Settings:
     video_codec: str = os.getenv("VIDEO_CODEC", "libx264")
     audio_codec: str = os.getenv("AUDIO_CODEC", "aac")
     ffmpeg_path: str = os.getenv("FFMPEG_PATH", "")
-    live_fps: int = _int_env("LIVE_FPS", 15)
-    live_jpeg_quality: int = _int_env("LIVE_JPEG_QUALITY", 5)
+    live_fps: int = _int_env("LIVE_FPS", 8)
+    live_width: int = _int_env("LIVE_WIDTH", 960)
+    live_jpeg_quality: int = _int_env("LIVE_JPEG_QUALITY", 8)
+    dshow_rtbufsize: str = os.getenv("DSHOW_RTBUFSIZE", "512M")
 
     data_dir: Path = BASE_DIR / "data"
     chunk_dir: Path = BASE_DIR / "data" / "chunks"

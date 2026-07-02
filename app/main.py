@@ -17,7 +17,7 @@ from .ffmpeg import CaptureProcess, cleanup_old_chunks, discover_ffmpeg_path, ff
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-APP_VERSION = "mjpeg-live-v2"
+APP_VERSION = "mjpeg-live-v3"
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 capture = CaptureProcess(settings)
@@ -38,6 +38,9 @@ async def capture_loop() -> None:
                 capture.start()
             except Exception:
                 logging.exception("Failed to start capture")
+        elif capture.live_frame_age_seconds() is not None and capture.live_frame_age_seconds() > 15:
+            logging.warning("Live frames stalled for %s seconds; restarting capture", capture.live_frame_age_seconds())
+            capture.stop()
         await asyncio.sleep(5)
 
 
