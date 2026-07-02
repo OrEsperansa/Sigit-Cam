@@ -85,7 +85,7 @@ RTSP_URL=
 FFMPEG_PATH=ffmpeg
 ```
 
-You can copy values from `.env.example` into your shell profile or set them in PowerShell before starting the server.
+You can also copy `.env.example` to `.env`; the app loads `.env` automatically on startup.
 
 Output folders are created automatically:
 

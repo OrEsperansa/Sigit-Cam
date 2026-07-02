@@ -6,21 +6,58 @@ const captureDot = document.querySelector("#capture-dot");
 const captureLabel = document.querySelector("#capture-label");
 const buffered = document.querySelector("#buffered");
 const deviceInfo = document.querySelector("#device-info");
+const liveOverlay = document.querySelector("#live-overlay");
+let hlsPlayer = null;
+let playerStarted = false;
 
-function setupPlayer() {
-  const source = "/static/hls/live.m3u8";
+async function livePlaylistExists() {
+  try {
+    const response = await fetch(`/static/hls/live.m3u8?ts=${Date.now()}`, { cache: "no-store" });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function setupPlayer() {
+  if (playerStarted) {
+    return;
+  }
+
+  if (!(await livePlaylistExists())) {
+    liveOverlay.textContent = "Waiting for live stream";
+    liveOverlay.classList.remove("hidden");
+    return;
+  }
+
+  const source = `/static/hls/live.m3u8?ts=${Date.now()}`;
   if (video.canPlayType("application/vnd.apple.mpegurl")) {
     video.src = source;
+    playerStarted = true;
+    liveOverlay.classList.add("hidden");
     return;
   }
 
   if (window.Hls?.isSupported()) {
-    const hls = new Hls({
+    hlsPlayer = new Hls({
       liveSyncDurationCount: 2,
       lowLatencyMode: true,
     });
-    hls.loadSource(source);
-    hls.attachMedia(video);
+    hlsPlayer.on(Hls.Events.ERROR, (_event, data) => {
+      if (!data.fatal) {
+        return;
+      }
+      hlsPlayer.destroy();
+      hlsPlayer = null;
+      playerStarted = false;
+      liveOverlay.textContent = "Reconnecting live stream";
+      liveOverlay.classList.remove("hidden");
+      setTimeout(setupPlayer, 1500);
+    });
+    hlsPlayer.loadSource(source);
+    hlsPlayer.attachMedia(video);
+    playerStarted = true;
+    liveOverlay.classList.add("hidden");
   } else {
     message.textContent = "This browser cannot play the live stream.";
   }
@@ -37,6 +74,16 @@ async function refreshStatus() {
   const audioDevice = capture.selected_audio_device || "No microphone selected";
   const error = capture.last_error || capture.device_error || "";
   deviceInfo.textContent = error ? `${videoDevice} / ${audioDevice} - ${error}` : `${videoDevice} / ${audioDevice}`;
+  if (!status.capture_running) {
+    liveOverlay.textContent = error || "Waiting for camera";
+    liveOverlay.classList.remove("hidden");
+  } else if (!status.live_hls_ready) {
+    liveOverlay.textContent = "Starting live stream";
+    liveOverlay.classList.remove("hidden");
+  }
+  if (status.capture_running || status.live_hls_ready) {
+    setupPlayer();
+  }
 }
 
 async function refreshReplays() {
@@ -80,8 +127,8 @@ saveButton.addEventListener("click", async () => {
   }
 });
 
-setupPlayer();
 refreshStatus();
 refreshReplays();
 setInterval(refreshStatus, 2000);
+setInterval(setupPlayer, 3000);
 setInterval(refreshReplays, 10000);

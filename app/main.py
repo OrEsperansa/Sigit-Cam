@@ -26,18 +26,26 @@ async def cleanup_loop() -> None:
         await asyncio.sleep(max(settings.chunk_seconds, 1))
 
 
+async def capture_loop() -> None:
+    while True:
+        if not capture.is_running():
+            try:
+                capture.start()
+            except Exception:
+                logging.exception("Failed to start capture")
+        await asyncio.sleep(5)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings.data_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        capture.start()
-    except Exception:
-        logging.exception("Failed to start capture")
-    task = asyncio.create_task(cleanup_loop())
+    cleanup_task = asyncio.create_task(cleanup_loop())
+    capture_task = asyncio.create_task(capture_loop())
     try:
         yield
     finally:
-        task.cancel()
+        cleanup_task.cancel()
+        capture_task.cancel()
         capture.stop()
 
 
@@ -61,6 +69,7 @@ async def index(request: Request):
 async def status():
     chunks = recent_chunks(settings, settings.max_buffer_seconds)
     capture_status = capture.status()
+    hls_ready = (settings.hls_dir / "live.m3u8").is_file()
     return {
         "capture_running": capture_status["running"],
         "capture": capture_status,
@@ -70,6 +79,7 @@ async def status():
         "buffered_chunks": len(chunks),
         "buffered_seconds_estimate": len(chunks) * settings.chunk_seconds,
         "live_hls": "/static/hls/live.m3u8",
+        "live_hls_ready": hls_ready,
         "ffmpeg_path": discover_ffmpeg_path() or settings.ffmpeg_path,
     }
 

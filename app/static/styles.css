@@ -21,6 +21,7 @@ body {
 }
 
 .viewer {
+  position: relative;
   display: grid;
   place-items: center;
   background: #07090b;
@@ -33,6 +34,26 @@ video {
   aspect-ratio: 16 / 9;
   background: #000;
   border: 1px solid #272d35;
+}
+
+.live-overlay {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  max-width: min(520px, calc(100% - 48px));
+  padding: 10px 12px;
+  border: 1px solid #313943;
+  border-radius: 6px;
+  background: rgba(18, 20, 23, 0.86);
+  color: #d7dee7;
+  font-size: 14px;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.live-overlay.hidden {
+  display: none;
 }
 
 .panel {
