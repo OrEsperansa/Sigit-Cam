@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from datetime import datetime
 from pathlib import Path
+from time import monotonic
 
 from .config import BASE_DIR, Settings
 
@@ -182,13 +183,16 @@ class CaptureProcess:
         self.selected_audio_device: str | None = None
         self.devices = DeviceInventory()
         self.last_error: str | None = None
+        self.latest_frame: bytes | None = None
+        self.latest_frame_at: float | None = None
+        self.frame_count = 0
+        self.frame_condition = asyncio.Condition()
 
     def start(self) -> None:
         if self.process and self.process.poll() is None:
             return
 
         self._ensure_dirs()
-        self._clear_live_hls()
         try:
             command = self._build_command()
         except Exception as exc:
@@ -199,7 +203,7 @@ class CaptureProcess:
         try:
             self.process = subprocess.Popen(
                 command,
-                stdout=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
@@ -211,17 +215,19 @@ class CaptureProcess:
                 command[0] = discovered
                 self.process = subprocess.Popen(
                     command,
-                    stdout=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
                     creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
                 )
                 self.last_error = None
                 asyncio.create_task(self._log_stderr())
+                asyncio.create_task(self._read_mjpeg_stdout())
                 return
             self.last_error = f"{self.settings.ffmpeg_path!r} was not found on PATH"
             raise RuntimeError(self.last_error) from exc
         asyncio.create_task(self._log_stderr())
+        asyncio.create_task(self._read_mjpeg_stdout())
 
     def stop(self) -> None:
         if not self.process or self.process.poll() is not None:
@@ -249,7 +255,14 @@ class CaptureProcess:
             "available_audio_devices": self.devices.audio,
             "device_error": self.devices.error,
             "last_error": self.last_error,
+            "live_frame_count": self.frame_count,
+            "live_frame_age_seconds": self.live_frame_age_seconds(),
         }
+
+    def live_frame_age_seconds(self) -> float | None:
+        if self.latest_frame_at is None:
+            return None
+        return round(monotonic() - self.latest_frame_at, 2)
 
     async def _log_stderr(self) -> None:
         if not self.process or not self.process.stderr:
@@ -260,15 +273,42 @@ class CaptureProcess:
                 break
             LOGGER.info(line.rstrip())
 
+    async def _read_mjpeg_stdout(self) -> None:
+        if not self.process or not self.process.stdout:
+            return
+
+        buffer = bytearray()
+        while True:
+            chunk = await asyncio.to_thread(self.process.stdout.buffer.read, 8192)
+            if not chunk:
+                break
+            buffer.extend(chunk)
+
+            while True:
+                start = buffer.find(b"\xff\xd8")
+                end = buffer.find(b"\xff\xd9", start + 2)
+                if start == -1:
+                    buffer.clear()
+                    break
+                if end == -1:
+                    if start > 0:
+                        del buffer[:start]
+                    break
+
+                frame = bytes(buffer[start : end + 2])
+                del buffer[: end + 2]
+                async with self.frame_condition:
+                    self.latest_frame = frame
+                    self.latest_frame_at = monotonic()
+                    self.frame_count += 1
+                    self.frame_condition.notify_all()
+
+            if len(buffer) > 2_000_000:
+                del buffer[:-2]
+
     def _ensure_dirs(self) -> None:
         self.settings.chunk_dir.mkdir(parents=True, exist_ok=True)
         self.settings.replay_dir.mkdir(parents=True, exist_ok=True)
-        self.settings.hls_dir.mkdir(parents=True, exist_ok=True)
-
-    def _clear_live_hls(self) -> None:
-        for item in self.settings.hls_dir.glob("*"):
-            if item.is_file():
-                item.unlink()
 
     def _build_command(self) -> list[str]:
         input_args = self._input_args()
@@ -284,35 +324,16 @@ class CaptureProcess:
             *input_args,
             "-map",
             "0:v:0",
-            "-map",
-            audio_map,
-            "-c:v",
-            self.settings.video_codec,
-            "-preset",
-            "ultrafast",
-            "-tune",
-            "zerolatency",
-            "-pix_fmt",
-            "yuv420p",
-            "-r",
-            str(self.settings.fps),
-            "-g",
-            str(max(self.settings.fps, 1)),
-            "-sc_threshold",
-            "0",
-            "-bf",
-            "0",
-            "-c:a",
-            "libopus",
-            "-b:a",
-            "64k",
-            "-application",
-            "lowdelay",
+            "-an",
+            "-vf",
+            f"fps={self.settings.live_fps}",
+            "-q:v",
+            str(self.settings.live_jpeg_quality),
             "-f",
-            "rtsp",
-            "-rtsp_transport",
-            "tcp",
-            self.settings.rtsp_publish_url,
+            "image2pipe",
+            "-vcodec",
+            "mjpeg",
+            "pipe:1",
             "-map",
             "0:v:0",
             "-map",

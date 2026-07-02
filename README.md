@@ -7,13 +7,12 @@ Local PC-hosted instant replay system with:
 - One-click replay saving without stopping capture
 - Replay list and downloads
 
-The current implementation uses FastAPI, FFmpeg, and bundled MediaMTX. The live viewer uses WebRTC for low latency. The replay path is independent of the live viewer: saving a replay only concatenates already-recorded chunks with `-c copy`.
+The current implementation uses FastAPI and bundled FFmpeg. The live viewer uses browser-native MJPEG for low-latency LAN viewing with no CDN, plugin, or extra media server. The replay path is independent of the live viewer: saving a replay only concatenates already-recorded chunks with `-c copy`.
 
 ## Requirements
 
 - Python 3.11+
 - FFmpeg binary in `ffmpeg/` or FFmpeg available on `PATH`
-- MediaMTX binary in `tools/mediamtx/`
 - A camera/audio source supported by FFmpeg
 
 Install Python dependencies:
@@ -32,12 +31,6 @@ Open the control page:
 
 ```text
 http://PC-IP:8000
-```
-
-The WebRTC player is embedded from MediaMTX on:
-
-```text
-http://PC-IP:8889/live/
 ```
 
 Local machine:
@@ -79,7 +72,8 @@ Environment variables:
 REPLAY_MINUTES=3
 MAX_BUFFER_MINUTES=5
 CHUNK_SECONDS=5
-HLS_SEGMENT_SECONDS=1
+LIVE_FPS=15
+LIVE_JPEG_QUALITY=5
 VIDEO_RESOLUTION=1920x1080
 FPS=30
 VIDEO_CODEC=libx264
@@ -91,9 +85,6 @@ AUDIO_DEVICE=
 RTSP_URL=
 # Optional override. By default the app uses ./ffmpeg/ffmpeg.exe.
 # FFMPEG_PATH=C:\path\to\ffmpeg.exe
-WEBRTC_HTTP_PORT=8889
-WEBRTC_STREAM_PATH=live
-RTSP_PUBLISH_URL=rtsp://127.0.0.1:8554/live
 ```
 
 You can also copy `.env.example` to `.env`; the app loads `.env` automatically on startup.
@@ -103,7 +94,6 @@ Output folders are created automatically:
 ```text
 data/chunks/
 data/replays/
-app/static/hls/
 ```
 
 ## Notes
@@ -112,4 +102,4 @@ app/static/hls/
 - Replay saving does not re-encode.
 - The capture process is started when the FastAPI app starts.
 - If FFmpeg cannot open the configured device, check the server logs and verify device names.
-- WebRTC can be added by publishing the same FFmpeg capture to MediaMTX while leaving the rolling segment recorder unchanged.
+- Live MJPEG video is available at `/live.mjpg`; saved replays are MP4 files with audio.

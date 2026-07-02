@@ -1,4 +1,4 @@
-const liveFrame = document.querySelector("#live-frame");
+const liveImage = document.querySelector("#live-image");
 const saveButton = document.querySelector("#save-button");
 const message = document.querySelector("#message");
 const replayList = document.querySelector("#replay-list");
@@ -9,38 +9,31 @@ const deviceInfo = document.querySelector("#device-info");
 const liveOverlay = document.querySelector("#live-overlay");
 
 let playerStarted = false;
-let lastStatus = null;
 
 function showStreamStatus(text) {
   liveOverlay.textContent = text;
   liveOverlay.classList.remove("hidden");
 }
 
-function showLiveFrame() {
-  liveFrame.classList.remove("hidden");
+function showLiveImage() {
+  liveImage.classList.remove("hidden");
   liveOverlay.classList.add("hidden");
 }
 
 function resetPlayer() {
-  liveFrame.removeAttribute("src");
-  liveFrame.classList.add("hidden");
+  liveImage.removeAttribute("src");
+  liveImage.classList.add("hidden");
   playerStarted = false;
 }
 
-function webrtcPlayerUrl(status) {
-  const port = status.webrtc_http_port || 8889;
-  const path = status.webrtc_path || "live";
-  return `${window.location.protocol}//${window.location.hostname}:${port}/${path}/`;
-}
-
-function setupPlayer(status = lastStatus) {
-  if (playerStarted || !status?.webrtc_running || !status?.capture_running) {
+function setupPlayer() {
+  if (playerStarted) {
     return;
   }
 
-  liveFrame.src = webrtcPlayerUrl(status);
+  liveImage.src = `/live.mjpg?ts=${Date.now()}`;
   playerStarted = true;
-  showLiveFrame();
+  showLiveImage();
 }
 
 async function refreshStatus() {
@@ -59,7 +52,6 @@ async function refreshStatus() {
     return;
   }
 
-  lastStatus = status;
   captureDot.classList.toggle("running", status.capture_running);
   captureLabel.textContent = status.capture_running ? "Capture running" : "Capture stopped";
   buffered.textContent = `${status.buffered_seconds_estimate} sec`;
@@ -70,13 +62,13 @@ async function refreshStatus() {
   const error = capture.last_error || capture.device_error || "";
   deviceInfo.textContent = error ? `${videoDevice} / ${audioDevice} - ${error}` : `${videoDevice} / ${audioDevice}`;
 
-  if (!status.webrtc_running || !status.capture_running) {
+  if (!status.live_ready) {
     resetPlayer();
     showStreamStatus(status.stream_warning || error || "Waiting for live stream");
     return;
   }
 
-  setupPlayer(status);
+  setupPlayer();
 }
 
 async function refreshReplays() {

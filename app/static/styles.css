@@ -28,15 +28,16 @@ body {
   padding: 16px;
 }
 
-iframe {
+img {
   width: 100%;
   max-height: calc(100vh - 32px);
   aspect-ratio: 16 / 9;
+  object-fit: contain;
   background: #000;
   border: 1px solid #272d35;
 }
 
-iframe.hidden {
+img.hidden {
   display: none;
 }
 
@@ -178,7 +179,7 @@ h2 {
     border-top: 1px solid #2a3038;
   }
 
-  iframe {
+  img {
     max-height: 60vh;
   }
 }

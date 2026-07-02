@@ -7,21 +7,19 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .config import settings
 from .ffmpeg import CaptureProcess, cleanup_old_chunks, discover_ffmpeg_path, ffmpeg_discovery_error, list_dshow_devices, recent_chunks, save_replay
-from .mediamtx import MediaMTXProcess
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-APP_VERSION = "webrtc-live-v1"
+APP_VERSION = "mjpeg-live-v1"
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
-mediamtx = MediaMTXProcess(settings)
 capture = CaptureProcess(settings)
 replay_lock = asyncio.Lock()
 replay_task: asyncio.Task[Path] | None = None
@@ -35,11 +33,6 @@ async def cleanup_loop() -> None:
 
 async def capture_loop() -> None:
     while True:
-        if not mediamtx.is_running():
-            try:
-                mediamtx.start()
-            except Exception:
-                logging.exception("Failed to start MediaMTX")
         if not capture.is_running():
             try:
                 capture.start()
@@ -59,7 +52,6 @@ async def lifespan(_: FastAPI):
         cleanup_task.cancel()
         capture_task.cancel()
         capture.stop()
-        mediamtx.stop()
 
 
 app = FastAPI(title="Instant Replay Camera", lifespan=lifespan)
@@ -83,29 +75,25 @@ async def index(request: Request):
 async def status():
     chunks = recent_chunks(settings, settings.max_buffer_seconds)
     capture_status = capture.status()
-    mediamtx_status = mediamtx.status()
     stream_warning = None
-    if not mediamtx_status["running"]:
-        stream_warning = mediamtx_status["last_error"] or "WebRTC server is not running"
-    elif not capture_status["running"]:
+    live_ready = capture_status["running"] and capture.latest_frame is not None
+    if not capture_status["running"]:
         stream_warning = capture_status["last_error"] or "Camera capture is not running"
+    elif not live_ready:
+        stream_warning = "Camera capture is running, waiting for first live frame"
     return {
         "app_version": APP_VERSION,
         "server_time": datetime.now(timezone.utc).isoformat(),
         "capture_running": capture_status["running"],
         "capture": capture_status,
-        "mediamtx": mediamtx_status,
-        "webrtc_running": mediamtx_status["running"],
-        "webrtc_path": settings.webrtc_path,
-        "webrtc_http_port": settings.webrtc_http_port,
-        "webrtc_player_url": f":{settings.webrtc_http_port}/{settings.webrtc_path}/",
+        "live_mode": "mjpeg",
+        "live_url": "/live.mjpg",
+        "live_ready": live_ready,
         "replay_minutes": settings.replay_minutes,
         "max_buffer_minutes": settings.max_buffer_minutes,
         "chunk_seconds": settings.chunk_seconds,
         "buffered_chunks": len(chunks),
         "buffered_seconds_estimate": len(chunks) * settings.chunk_seconds,
-        "live_hls": None,
-        "live_hls_ready": False,
         "stream_warning": stream_warning,
         "ffmpeg_path": discover_ffmpeg_path() or settings.ffmpeg_path,
         "ffmpeg_error": ffmpeg_discovery_error(),
@@ -131,6 +119,33 @@ async def devices():
         "ffmpeg_path": ffmpeg_path,
         "ffmpeg_error": ffmpeg_discovery_error(),
     }
+
+
+@app.get("/live.mjpg")
+async def live_mjpeg():
+    async def frames():
+        last_count = -1
+        while True:
+            async with capture.frame_condition:
+                await capture.frame_condition.wait_for(lambda: capture.frame_count != last_count or not capture.is_running())
+                if capture.latest_frame is None:
+                    await asyncio.sleep(0.05)
+                    continue
+                frame = capture.latest_frame
+                last_count = capture.frame_count
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n"
+                b"Cache-Control: no-store\r\n\r\n"
+                + frame
+                + b"\r\n"
+            )
+
+    return StreamingResponse(
+        frames(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+    )
 
 
 @app.post("/api/replays")
