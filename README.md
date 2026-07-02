@@ -12,7 +12,7 @@ The current implementation uses FastAPI plus FFmpeg. The live viewer defaults to
 ## Requirements
 
 - Python 3.11+
-- FFmpeg available on `PATH`
+- FFmpeg binaries in `ffmpeg/` or FFmpeg available on `PATH`
 - A camera/audio source supported by FFmpeg
 
 Install Python dependencies:
@@ -82,7 +82,8 @@ AUTO_DETECT_DEVICES=1
 VIDEO_DEVICE=
 AUDIO_DEVICE=
 RTSP_URL=
-FFMPEG_PATH=ffmpeg
+# Optional override. By default the app uses ./ffmpeg/ffmpeg.exe.
+# FFMPEG_PATH=C:\path\to\ffmpeg.exe
 ```
 
 You can also copy `.env.example` to `.env`; the app loads `.env` automatically on startup.

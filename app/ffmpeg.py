@@ -12,7 +12,7 @@ from functools import lru_cache
 from datetime import datetime
 from pathlib import Path
 
-from .config import Settings
+from .config import BASE_DIR, Settings
 
 
 LOGGER = logging.getLogger("instant_replay.ffmpeg")
@@ -84,6 +84,10 @@ def list_dshow_devices(ffmpeg_path: str) -> DeviceInventory:
 
 @lru_cache(maxsize=1)
 def discover_ffmpeg_path() -> str | None:
+    local_ffmpeg = BASE_DIR / "ffmpeg" / "ffmpeg.exe"
+    if local_ffmpeg.is_file():
+        return str(local_ffmpeg)
+
     path_match = shutil.which("ffmpeg")
     if path_match:
         return path_match
@@ -213,7 +217,7 @@ class CaptureProcess:
         chunk_pattern = self.settings.chunk_dir / "chunk_%Y%m%d_%H%M%S.mp4"
 
         return [
-            self.settings.ffmpeg_path,
+            discover_ffmpeg_path() or self.settings.ffmpeg_path,
             "-hide_banner",
             "-loglevel",
             "warning",
@@ -344,7 +348,7 @@ class CaptureProcess:
         if not self.settings.auto_detect_devices:
             raise RuntimeError("VIDEO_DEVICE is required when AUTO_DETECT_DEVICES=0")
 
-        self.devices = list_dshow_devices(self.settings.ffmpeg_path)
+        self.devices = list_dshow_devices(discover_ffmpeg_path() or self.settings.ffmpeg_path)
         if self.devices.error:
             raise RuntimeError(self.devices.error)
         if not self.devices.video:
@@ -397,7 +401,7 @@ async def save_replay(settings: Settings, seconds: int | None = None) -> Path:
     )
 
     command = [
-        settings.ffmpeg_path,
+        discover_ffmpeg_path() or settings.ffmpeg_path,
         "-hide_banner",
         "-loglevel",
         "error",

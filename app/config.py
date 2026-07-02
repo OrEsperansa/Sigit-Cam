@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
+DEFAULT_FFMPEG_PATH = BASE_DIR / "ffmpeg" / "ffmpeg.exe"
 
 
 def _int_env(name: str, default: int) -> int:
@@ -37,7 +38,7 @@ class Settings:
     fps: int = _int_env("FPS", 30)
     video_codec: str = os.getenv("VIDEO_CODEC", "libx264")
     audio_codec: str = os.getenv("AUDIO_CODEC", "aac")
-    ffmpeg_path: str = os.getenv("FFMPEG_PATH", "ffmpeg")
+    ffmpeg_path: str = str(DEFAULT_FFMPEG_PATH) if DEFAULT_FFMPEG_PATH.is_file() else os.getenv("FFMPEG_PATH", "ffmpeg")
 
     data_dir: Path = BASE_DIR / "data"
     chunk_dir: Path = BASE_DIR / "data" / "chunks"
