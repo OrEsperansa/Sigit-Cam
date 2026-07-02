@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .config import settings
-from .ffmpeg import CaptureProcess, cleanup_old_chunks, discover_ffmpeg_path, list_dshow_devices, recent_chunks, save_replay
+from .ffmpeg import CaptureProcess, cleanup_old_chunks, discover_ffmpeg_path, ffmpeg_discovery_error, list_dshow_devices, recent_chunks, save_replay
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -115,6 +115,7 @@ async def status():
         "live_hls_latest_file_age_seconds": hls["latest_file_age_seconds"],
         "stream_warning": stream_warning,
         "ffmpeg_path": discover_ffmpeg_path() or settings.ffmpeg_path,
+        "ffmpeg_error": ffmpeg_discovery_error(),
     }
 
 
@@ -126,10 +127,17 @@ async def devices():
             "audio": [],
             "error": f"Device detection is only implemented for dshow, current mode is {settings.input_mode}",
             "ffmpeg_path": discover_ffmpeg_path() or settings.ffmpeg_path,
+            "ffmpeg_error": ffmpeg_discovery_error(),
         }
     ffmpeg_path = discover_ffmpeg_path() or settings.ffmpeg_path
     inventory = list_dshow_devices(ffmpeg_path)
-    return {"video": inventory.video, "audio": inventory.audio, "error": inventory.error, "ffmpeg_path": ffmpeg_path}
+    return {
+        "video": inventory.video,
+        "audio": inventory.audio,
+        "error": inventory.error,
+        "ffmpeg_path": ffmpeg_path,
+        "ffmpeg_error": ffmpeg_discovery_error(),
+    }
 
 
 @app.get("/live/live.m3u8")

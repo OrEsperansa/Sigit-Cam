@@ -25,7 +25,28 @@ class DeviceInventory:
     error: str | None = None
 
 
+@lru_cache(maxsize=1)
+def ffmpeg_discovery_error() -> str | None:
+    if discover_ffmpeg_path():
+        return None
+    candidates = _ffmpeg_candidates()
+    if not candidates:
+        return "No FFmpeg executable was found"
+    errors = [f"{path}: {error}" for path, error in candidates if error]
+    return "; ".join(errors) if errors else "No usable FFmpeg executable was found"
+
+
+def require_ffmpeg_path() -> str:
+    path = discover_ffmpeg_path()
+    if path:
+        return path
+    raise RuntimeError(ffmpeg_discovery_error() or "No usable FFmpeg executable was found")
+
+
 def list_dshow_devices(ffmpeg_path: str) -> DeviceInventory:
+    if not ffmpeg_path:
+        return DeviceInventory(error=ffmpeg_discovery_error() or "No usable FFmpeg executable was found")
+
     command = [
         ffmpeg_path,
         "-hide_banner",
@@ -51,6 +72,11 @@ def list_dshow_devices(ffmpeg_path: str) -> DeviceInventory:
         if discovered and discovered != ffmpeg_path:
             return list_dshow_devices(discovered)
         return DeviceInventory(error=f"{ffmpeg_path!r} was not found on PATH")
+    except OSError as exc:
+        discovered = discover_ffmpeg_path()
+        if discovered and discovered != ffmpeg_path:
+            return list_dshow_devices(discovered)
+        return DeviceInventory(error=f"{ffmpeg_path!r} could not run: {exc}")
     except subprocess.TimeoutExpired:
         return DeviceInventory(error="FFmpeg device detection timed out")
 
@@ -84,32 +110,67 @@ def list_dshow_devices(ffmpeg_path: str) -> DeviceInventory:
 
 @lru_cache(maxsize=1)
 def discover_ffmpeg_path() -> str | None:
-    local_ffmpeg = BASE_DIR / "ffmpeg" / "ffmpeg.exe"
-    if local_ffmpeg.is_file():
-        return str(local_ffmpeg)
+    for candidate, error in _ffmpeg_candidates():
+        if error is None:
+            return str(candidate)
+        LOGGER.warning("Skipping unusable FFmpeg candidate %s: %s", candidate, error)
+    return None
 
-    path_match = shutil.which("ffmpeg")
-    if path_match:
-        return path_match
 
+def _ffmpeg_candidates() -> list[tuple[Path, str | None]]:
     local_app_data = Path(os.getenv("LOCALAPPDATA", ""))
     program_files = Path(os.getenv("ProgramFiles", ""))
     program_files_x86 = Path(os.getenv("ProgramFiles(x86)", ""))
     user_profile = Path(os.getenv("USERPROFILE", ""))
+    env_path = os.getenv("FFMPEG_PATH", "")
+    path_match = shutil.which("ffmpeg")
 
-    candidates = [
-        program_files / "Gyan" / "FFmpeg" / "bin" / "ffmpeg.exe",
-        program_files / "ffmpeg" / "bin" / "ffmpeg.exe",
-        program_files_x86 / "Gyan" / "FFmpeg" / "bin" / "ffmpeg.exe",
-        local_app_data / "Microsoft" / "WinGet" / "Packages" / "Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe" / "ffmpeg-8.0-full_build" / "bin" / "ffmpeg.exe",
-        local_app_data / "Programs" / "LNV" / "Stremio-4" / "ffmpeg.exe",
-        user_profile / "scoop" / "shims" / "ffmpeg.exe",
-        Path("C:/ffmpeg/bin/ffmpeg.exe"),
-    ]
+    candidates: list[Path] = []
+    candidates.append(BASE_DIR / "ffmpeg" / "ffmpeg.exe")
+    if env_path:
+        candidates.append(Path(env_path))
+    if path_match:
+        candidates.append(Path(path_match))
+    candidates.extend(
+        [
+            program_files / "Gyan" / "FFmpeg" / "bin" / "ffmpeg.exe",
+            program_files / "ffmpeg" / "bin" / "ffmpeg.exe",
+            program_files_x86 / "Gyan" / "FFmpeg" / "bin" / "ffmpeg.exe",
+            local_app_data / "Microsoft" / "WinGet" / "Packages" / "Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe" / "ffmpeg-8.0-full_build" / "bin" / "ffmpeg.exe",
+            local_app_data / "Programs" / "LNV" / "Stremio-4" / "ffmpeg.exe",
+            user_profile / "scoop" / "shims" / "ffmpeg.exe",
+            Path("C:/ffmpeg/bin/ffmpeg.exe"),
+        ]
+    )
 
+    seen: set[Path] = set()
+    results: list[tuple[Path, str | None]] = []
     for candidate in candidates:
-        if candidate.is_file():
-            return str(candidate)
+        if candidate in seen or not candidate.is_file():
+            continue
+        seen.add(candidate)
+        results.append((candidate, _validate_ffmpeg(candidate)))
+    return results
+
+
+def _validate_ffmpeg(path: Path) -> str | None:
+    try:
+        result = subprocess.run(
+            [str(path), "-version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except OSError as exc:
+        return str(exc)
+    except subprocess.TimeoutExpired:
+        return "timed out while running -version"
+
+    if result.returncode != 0:
+        output = result.stderr.strip() or result.stdout.strip()
+        return output or f"exited with code {result.returncode}"
     return None
 
 
@@ -217,7 +278,7 @@ class CaptureProcess:
         chunk_pattern = self.settings.chunk_dir / "chunk_%Y%m%d_%H%M%S.mp4"
 
         return [
-            discover_ffmpeg_path() or self.settings.ffmpeg_path,
+            require_ffmpeg_path(),
             "-hide_banner",
             "-loglevel",
             "warning",
@@ -401,7 +462,7 @@ async def save_replay(settings: Settings, seconds: int | None = None) -> Path:
     )
 
     command = [
-        discover_ffmpeg_path() or settings.ffmpeg_path,
+        require_ffmpeg_path(),
         "-hide_banner",
         "-loglevel",
         "error",
