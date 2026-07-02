@@ -91,7 +91,7 @@ async function setupPlayer() {
       return;
     }
 
-    showStreamStatus("This browser cannot play the live stream");
+    showStreamStatus("Local HLS player failed to load");
   } finally {
     setupInFlight = false;
   }

@@ -17,7 +17,7 @@ from .ffmpeg import CaptureProcess, cleanup_old_chunks, discover_ffmpeg_path, ff
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-APP_VERSION = "live-hls-v2"
+APP_VERSION = "offline-hls-v3"
 NO_STORE_HEADERS = {
     "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
     "Pragma": "no-cache",
