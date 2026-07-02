@@ -187,12 +187,16 @@ class CaptureProcess:
         self.latest_frame_at: float | None = None
         self.frame_count = 0
         self.frame_condition = asyncio.Condition()
+        self.live_clients = 0
 
     def start(self) -> None:
         if self.process and self.process.poll() is None:
             return
 
         self._ensure_dirs()
+        self.latest_frame = None
+        self.latest_frame_at = None
+        self.frame_count = 0
         try:
             command = self._build_command()
         except Exception as exc:
@@ -257,6 +261,7 @@ class CaptureProcess:
             "last_error": self.last_error,
             "live_frame_count": self.frame_count,
             "live_frame_age_seconds": self.live_frame_age_seconds(),
+            "live_clients": self.live_clients,
         }
 
     def live_frame_age_seconds(self) -> float | None:

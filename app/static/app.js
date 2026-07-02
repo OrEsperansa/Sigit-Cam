@@ -9,6 +9,8 @@ const deviceInfo = document.querySelector("#device-info");
 const liveOverlay = document.querySelector("#live-overlay");
 
 let playerStarted = false;
+let lastLiveFrameCount = 0;
+let unchangedStatusPolls = 0;
 
 function showStreamStatus(text) {
   liveOverlay.textContent = text;
@@ -24,6 +26,7 @@ function resetPlayer() {
   liveImage.removeAttribute("src");
   liveImage.classList.add("hidden");
   playerStarted = false;
+  unchangedStatusPolls = 0;
 }
 
 function setupPlayer() {
@@ -35,6 +38,12 @@ function setupPlayer() {
   playerStarted = true;
   showLiveImage();
 }
+
+liveImage.addEventListener("error", () => {
+  resetPlayer();
+  showStreamStatus("Live stream disconnected, reconnecting");
+  setTimeout(refreshStatus, 1000);
+});
 
 async function refreshStatus() {
   let status;
@@ -65,6 +74,21 @@ async function refreshStatus() {
   if (!status.live_ready) {
     resetPlayer();
     showStreamStatus(status.stream_warning || error || "Waiting for live stream");
+    return;
+  }
+
+  const liveFrameCount = capture.live_frame_count || 0;
+  if (playerStarted && liveFrameCount === lastLiveFrameCount) {
+    unchangedStatusPolls += 1;
+  } else {
+    unchangedStatusPolls = 0;
+  }
+  lastLiveFrameCount = liveFrameCount;
+
+  if (playerStarted && unchangedStatusPolls >= 4) {
+    resetPlayer();
+    showStreamStatus("Live stream stalled, reconnecting");
+    setTimeout(setupPlayer, 500);
     return;
   }
 

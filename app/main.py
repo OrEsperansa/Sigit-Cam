@@ -17,7 +17,7 @@ from .ffmpeg import CaptureProcess, cleanup_old_chunks, discover_ffmpeg_path, ff
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-APP_VERSION = "mjpeg-live-v1"
+APP_VERSION = "mjpeg-live-v2"
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 capture = CaptureProcess(settings)
@@ -76,11 +76,12 @@ async def status():
     chunks = recent_chunks(settings, settings.max_buffer_seconds)
     capture_status = capture.status()
     stream_warning = None
-    live_ready = capture_status["running"] and capture.latest_frame is not None
+    frame_age = capture_status["live_frame_age_seconds"]
+    live_ready = capture_status["running"] and capture.latest_frame is not None and (frame_age is None or frame_age < 5)
     if not capture_status["running"]:
         stream_warning = capture_status["last_error"] or "Camera capture is not running"
     elif not live_ready:
-        stream_warning = "Camera capture is running, waiting for first live frame"
+        stream_warning = "Camera capture is running, waiting for fresh live frames"
     return {
         "app_version": APP_VERSION,
         "server_time": datetime.now(timezone.utc).isoformat(),
@@ -125,26 +126,43 @@ async def devices():
 async def live_mjpeg():
     async def frames():
         last_count = -1
-        while True:
-            async with capture.frame_condition:
-                await capture.frame_condition.wait_for(lambda: capture.frame_count != last_count or not capture.is_running())
-                if capture.latest_frame is None:
-                    await asyncio.sleep(0.05)
-                    continue
-                frame = capture.latest_frame
-                last_count = capture.frame_count
-            yield (
-                b"--frame\r\n"
-                b"Content-Type: image/jpeg\r\n"
-                b"Cache-Control: no-store\r\n\r\n"
-                + frame
-                + b"\r\n"
-            )
+        capture.live_clients += 1
+        try:
+            while capture.is_running():
+                async with capture.frame_condition:
+                    try:
+                        await asyncio.wait_for(
+                            capture.frame_condition.wait_for(lambda: capture.frame_count != last_count or not capture.is_running()),
+                            timeout=10,
+                        )
+                    except asyncio.TimeoutError:
+                        break
+                    if capture.latest_frame is None:
+                        continue
+                    frame = capture.latest_frame
+                    last_count = capture.frame_count
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n"
+                    b"Cache-Control: no-store\r\n\r\n"
+                    + frame
+                    + b"\r\n"
+                )
+                await asyncio.sleep(0)
+        except asyncio.CancelledError:
+            raise
+        finally:
+            capture.live_clients = max(0, capture.live_clients - 1)
 
     return StreamingResponse(
         frames(),
         media_type="multipart/x-mixed-replace; boundary=frame",
-        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
