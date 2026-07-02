@@ -5,12 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Instant Replay Camera</title>
     <link rel="stylesheet" href="/static/styles.css" />
-    <script src="/static/vendor/hls.min.js?v={{ app_version }}"></script>
   </head>
   <body>
     <main class="shell">
       <section class="viewer">
-        <video id="live-video" class="hidden" autoplay muted playsinline controls></video>
+        <iframe id="live-frame" class="hidden" title="Live stream" allow="autoplay; fullscreen"></iframe>
         <div id="live-overlay" class="live-overlay">Checking stream</div>
       </section>
 

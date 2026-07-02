@@ -38,6 +38,11 @@ class Settings:
     video_codec: str = os.getenv("VIDEO_CODEC", "libx264")
     audio_codec: str = os.getenv("AUDIO_CODEC", "aac")
     ffmpeg_path: str = os.getenv("FFMPEG_PATH", "")
+    mediamtx_path: str = os.getenv("MEDIAMTX_PATH", str(BASE_DIR / "tools" / "mediamtx" / "mediamtx.exe"))
+    mediamtx_config: str = os.getenv("MEDIAMTX_CONFIG", str(BASE_DIR / "tools" / "mediamtx" / "mediamtx.yml"))
+    webrtc_path: str = os.getenv("WEBRTC_PATH", os.getenv("WEBRTC_STREAM_PATH", "live"))
+    webrtc_http_port: int = _int_env("WEBRTC_HTTP_PORT", 8889)
+    rtsp_publish_url: str = os.getenv("RTSP_PUBLISH_URL", "rtsp://127.0.0.1:8554/live")
 
     data_dir: Path = BASE_DIR / "data"
     chunk_dir: Path = BASE_DIR / "data" / "chunks"

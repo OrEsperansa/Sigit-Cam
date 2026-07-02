@@ -7,12 +7,13 @@ Local PC-hosted instant replay system with:
 - One-click replay saving without stopping capture
 - Replay list and downloads
 
-The current implementation uses FastAPI plus FFmpeg. The live viewer defaults to low-latency HLS so it runs without a separate media server. The replay path is independent of the live viewer: saving a replay only concatenates already-recorded chunks with `-c copy`.
+The current implementation uses FastAPI, FFmpeg, and bundled MediaMTX. The live viewer uses WebRTC for low latency. The replay path is independent of the live viewer: saving a replay only concatenates already-recorded chunks with `-c copy`.
 
 ## Requirements
 
 - Python 3.11+
-- FFmpeg binaries in `ffmpeg/` or FFmpeg available on `PATH`
+- FFmpeg binary in `ffmpeg/` or FFmpeg available on `PATH`
+- MediaMTX binary in `tools/mediamtx/`
 - A camera/audio source supported by FFmpeg
 
 Install Python dependencies:
@@ -27,10 +28,16 @@ python -m pip install -r requirements.txt
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-Open:
+Open the control page:
 
 ```text
 http://PC-IP:8000
+```
+
+The WebRTC player is embedded from MediaMTX on:
+
+```text
+http://PC-IP:8889/live/
 ```
 
 Local machine:
@@ -84,6 +91,9 @@ AUDIO_DEVICE=
 RTSP_URL=
 # Optional override. By default the app uses ./ffmpeg/ffmpeg.exe.
 # FFMPEG_PATH=C:\path\to\ffmpeg.exe
+WEBRTC_HTTP_PORT=8889
+WEBRTC_STREAM_PATH=live
+RTSP_PUBLISH_URL=rtsp://127.0.0.1:8554/live
 ```
 
 You can also copy `.env.example` to `.env`; the app loads `.env` automatically on startup.

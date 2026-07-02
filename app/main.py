@@ -7,24 +7,21 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .config import settings
 from .ffmpeg import CaptureProcess, cleanup_old_chunks, discover_ffmpeg_path, ffmpeg_discovery_error, list_dshow_devices, recent_chunks, save_replay
+from .mediamtx import MediaMTXProcess
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-APP_VERSION = "offline-hls-v4"
-NO_STORE_HEADERS = {
-    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-    "Pragma": "no-cache",
-    "Expires": "0",
-}
+APP_VERSION = "webrtc-live-v1"
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
+mediamtx = MediaMTXProcess(settings)
 capture = CaptureProcess(settings)
 replay_lock = asyncio.Lock()
 replay_task: asyncio.Task[Path] | None = None
@@ -38,6 +35,11 @@ async def cleanup_loop() -> None:
 
 async def capture_loop() -> None:
     while True:
+        if not mediamtx.is_running():
+            try:
+                mediamtx.start()
+            except Exception:
+                logging.exception("Failed to start MediaMTX")
         if not capture.is_running():
             try:
                 capture.start()
@@ -57,6 +59,7 @@ async def lifespan(_: FastAPI):
         cleanup_task.cancel()
         capture_task.cancel()
         capture.stop()
+        mediamtx.stop()
 
 
 app = FastAPI(title="Instant Replay Camera", lifespan=lifespan)
@@ -76,45 +79,33 @@ async def index(request: Request):
     )
 
 
-def hls_diagnostics() -> dict[str, object]:
-    files = [path for path in settings.hls_dir.glob("*") if path.is_file()]
-    playlist = settings.hls_dir / "live.m3u8"
-    latest = max(files, key=lambda path: path.stat().st_mtime, default=None)
-    latest_timestamp = latest.stat().st_mtime if latest else None
-    latest_age = (datetime.now().timestamp() - latest_timestamp) if latest_timestamp else None
-    return {
-        "ready": playlist.is_file(),
-        "file_count": len(files),
-        "latest_file": latest.name if latest else None,
-        "latest_file_modified": latest_timestamp,
-        "latest_file_age_seconds": round(latest_age, 1) if latest_age is not None else None,
-    }
-
-
 @app.get("/api/status")
 async def status():
     chunks = recent_chunks(settings, settings.max_buffer_seconds)
     capture_status = capture.status()
-    hls = hls_diagnostics()
+    mediamtx_status = mediamtx.status()
     stream_warning = None
-    if capture_status["running"] and not hls["ready"]:
-        stream_warning = "Capture is running, but the live HLS playlist has not been created yet"
+    if not mediamtx_status["running"]:
+        stream_warning = mediamtx_status["last_error"] or "WebRTC server is not running"
+    elif not capture_status["running"]:
+        stream_warning = capture_status["last_error"] or "Camera capture is not running"
     return {
         "app_version": APP_VERSION,
         "server_time": datetime.now(timezone.utc).isoformat(),
         "capture_running": capture_status["running"],
         "capture": capture_status,
+        "mediamtx": mediamtx_status,
+        "webrtc_running": mediamtx_status["running"],
+        "webrtc_path": settings.webrtc_path,
+        "webrtc_http_port": settings.webrtc_http_port,
+        "webrtc_player_url": f":{settings.webrtc_http_port}/{settings.webrtc_path}/",
         "replay_minutes": settings.replay_minutes,
         "max_buffer_minutes": settings.max_buffer_minutes,
         "chunk_seconds": settings.chunk_seconds,
         "buffered_chunks": len(chunks),
         "buffered_seconds_estimate": len(chunks) * settings.chunk_seconds,
-        "live_hls": "/live/live.m3u8",
-        "live_hls_ready": hls["ready"],
-        "live_hls_file_count": hls["file_count"],
-        "live_hls_latest_file": hls["latest_file"],
-        "live_hls_latest_file_modified": hls["latest_file_modified"],
-        "live_hls_latest_file_age_seconds": hls["latest_file_age_seconds"],
+        "live_hls": None,
+        "live_hls_ready": False,
         "stream_warning": stream_warning,
         "ffmpeg_path": discover_ffmpeg_path() or settings.ffmpeg_path,
         "ffmpeg_error": ffmpeg_discovery_error(),
@@ -140,26 +131,6 @@ async def devices():
         "ffmpeg_path": ffmpeg_path,
         "ffmpeg_error": ffmpeg_discovery_error(),
     }
-
-
-@app.get("/live/live.m3u8")
-async def live_playlist():
-    path = settings.hls_dir / "live.m3u8"
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="Live stream is not ready")
-    content = path.read_text(encoding="utf-8", errors="replace")
-    return Response(content, media_type="application/vnd.apple.mpegurl", headers=NO_STORE_HEADERS)
-
-
-@app.get("/live/{segment_name}")
-async def live_segment(segment_name: str):
-    if "/" in segment_name or "\\" in segment_name or segment_name.startswith("."):
-        raise HTTPException(status_code=404, detail="Segment not found")
-    path = settings.hls_dir / segment_name
-    if not path.is_file() or path.parent != settings.hls_dir:
-        raise HTTPException(status_code=404, detail="Segment not found")
-    media_type = "video/mp2t" if path.suffix.lower() == ".ts" else "application/octet-stream"
-    return FileResponse(path, media_type=media_type, headers=NO_STORE_HEADERS)
 
 
 @app.post("/api/replays")

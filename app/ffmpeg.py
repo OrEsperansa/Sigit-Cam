@@ -274,7 +274,6 @@ class CaptureProcess:
         input_args = self._input_args()
         audio_map = self._audio_map()
         keyframe_interval = max(self.settings.fps * self.settings.chunk_seconds, 1)
-        hls_path = self.settings.hls_dir / "live.m3u8"
         chunk_pattern = self.settings.chunk_dir / "chunk_%Y%m%d_%H%M%S.mp4"
 
         return [
@@ -290,7 +289,7 @@ class CaptureProcess:
             "-c:v",
             self.settings.video_codec,
             "-preset",
-            "veryfast",
+            "ultrafast",
             "-tune",
             "zerolatency",
             "-pix_fmt",
@@ -298,22 +297,22 @@ class CaptureProcess:
             "-r",
             str(self.settings.fps),
             "-g",
-            str(keyframe_interval),
+            str(max(self.settings.fps, 1)),
             "-sc_threshold",
             "0",
+            "-bf",
+            "0",
             "-c:a",
-            self.settings.audio_codec,
+            "libopus",
             "-b:a",
-            "128k",
+            "64k",
+            "-application",
+            "lowdelay",
             "-f",
-            "hls",
-            "-hls_time",
-            str(self.settings.hls_segment_seconds),
-            "-hls_list_size",
-            "4",
-            "-hls_flags",
-            "delete_segments+append_list+omit_endlist",
-            str(hls_path),
+            "rtsp",
+            "-rtsp_transport",
+            "tcp",
+            self.settings.rtsp_publish_url,
             "-map",
             "0:v:0",
             "-map",

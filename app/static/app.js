@@ -1,4 +1,4 @@
-const video = document.querySelector("#live-video");
+const liveFrame = document.querySelector("#live-frame");
 const saveButton = document.querySelector("#save-button");
 const message = document.querySelector("#message");
 const replayList = document.querySelector("#replay-list");
@@ -7,97 +7,40 @@ const captureLabel = document.querySelector("#capture-label");
 const buffered = document.querySelector("#buffered");
 const deviceInfo = document.querySelector("#device-info");
 const liveOverlay = document.querySelector("#live-overlay");
-let hlsPlayer = null;
-let playerStarted = false;
-let setupInFlight = false;
-let lastStatus = null;
 
-async function livePlaylistExists() {
-  try {
-    const response = await fetch(`/live/live.m3u8?ts=${Date.now()}`, { cache: "no-store" });
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
+let playerStarted = false;
+let lastStatus = null;
 
 function showStreamStatus(text) {
   liveOverlay.textContent = text;
   liveOverlay.classList.remove("hidden");
 }
 
-function showVideo() {
-  video.classList.remove("hidden");
+function showLiveFrame() {
+  liveFrame.classList.remove("hidden");
   liveOverlay.classList.add("hidden");
 }
 
-function hideVideo() {
-  video.classList.add("hidden");
-}
-
 function resetPlayer() {
-  if (hlsPlayer) {
-    hlsPlayer.destroy();
-    hlsPlayer = null;
-  }
-  video.removeAttribute("src");
-  video.load();
+  liveFrame.removeAttribute("src");
+  liveFrame.classList.add("hidden");
   playerStarted = false;
-  hideVideo();
 }
 
-async function setupPlayer() {
-  if (playerStarted || setupInFlight) {
+function webrtcPlayerUrl(status) {
+  const port = status.webrtc_http_port || 8889;
+  const path = status.webrtc_path || "live";
+  return `${window.location.protocol}//${window.location.hostname}:${port}/${path}/`;
+}
+
+function setupPlayer(status = lastStatus) {
+  if (playerStarted || !status?.webrtc_running || !status?.capture_running) {
     return;
   }
-  setupInFlight = true;
 
-  try {
-    if (!(await livePlaylistExists())) {
-      showStreamStatus("Waiting for live stream");
-      hideVideo();
-      return;
-    }
-
-    const source = `/live/live.m3u8?ts=${Date.now()}`;
-    if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      video.src = source;
-      playerStarted = true;
-      showVideo();
-      video.play().catch(() => {});
-      return;
-    }
-
-    if (window.Hls?.isSupported()) {
-      hlsPlayer = new Hls({
-        liveSyncDurationCount: 2,
-        lowLatencyMode: true,
-      });
-      hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => {
-        showVideo();
-        video.play().catch(() => {});
-      });
-      hlsPlayer.on(Hls.Events.ERROR, (_event, data) => {
-        if (!data.fatal) {
-          return;
-        }
-        resetPlayer();
-        showStreamStatus("Reconnecting live stream");
-        setTimeout(setupPlayer, 1500);
-      });
-      hlsPlayer.loadSource(source);
-      hlsPlayer.attachMedia(video);
-      playerStarted = true;
-      return;
-    }
-
-    showStreamStatus("Local HLS player failed to load");
-  } catch (error) {
-    resetPlayer();
-    showStreamStatus(`Live player error: ${error.message}`);
-  } finally {
-    setupInFlight = false;
-  }
+  liveFrame.src = webrtcPlayerUrl(status);
+  playerStarted = true;
+  showLiveFrame();
 }
 
 async function refreshStatus() {
@@ -115,26 +58,25 @@ async function refreshStatus() {
     showStreamStatus(`Cannot reach server: ${error.message}`);
     return;
   }
+
   lastStatus = status;
   captureDot.classList.toggle("running", status.capture_running);
   captureLabel.textContent = status.capture_running ? "Capture running" : "Capture stopped";
   buffered.textContent = `${status.buffered_seconds_estimate} sec`;
+
   const capture = status.capture || {};
   const videoDevice = capture.selected_video_device || "No camera selected";
   const audioDevice = capture.selected_audio_device || "No microphone selected";
   const error = capture.last_error || capture.device_error || "";
   deviceInfo.textContent = error ? `${videoDevice} / ${audioDevice} - ${error}` : `${videoDevice} / ${audioDevice}`;
-  const warning = status.stream_warning || "";
-  if (!status.capture_running) {
+
+  if (!status.webrtc_running || !status.capture_running) {
     resetPlayer();
-    showStreamStatus(error || "Waiting for camera");
-  } else if (!status.live_hls_ready) {
-    resetPlayer();
-    showStreamStatus(warning || "Camera detected, waiting for video");
+    showStreamStatus(status.stream_warning || error || "Waiting for live stream");
+    return;
   }
-  if (status.live_hls_ready) {
-    setupPlayer();
-  }
+
+  setupPlayer(status);
 }
 
 async function refreshReplays() {
@@ -181,5 +123,4 @@ saveButton.addEventListener("click", async () => {
 refreshStatus();
 refreshReplays();
 setInterval(refreshStatus, 2000);
-setInterval(setupPlayer, 3000);
 setInterval(refreshReplays, 10000);
