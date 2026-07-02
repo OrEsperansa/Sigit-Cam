@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Instant Replay Camera</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="viewer">
+        <video id="live-video" autoplay muted playsinline controls></video>
+      </section>
+
+      <aside class="panel">
+        <div class="status-row">
+          <span id="capture-dot" class="dot"></span>
+          <span id="capture-label">Checking capture</span>
+        </div>
+        <p id="device-info" class="device-info">Detecting devices</p>
+
+        <dl class="stats">
+          <div>
+            <dt>Replay</dt>
+            <dd>{{ replay_minutes }} min</dd>
+          </div>
+          <div>
+            <dt>Chunk</dt>
+            <dd>{{ chunk_seconds }} sec</dd>
+          </div>
+          <div>
+            <dt>Buffered</dt>
+            <dd id="buffered">0 sec</dd>
+          </div>
+        </dl>
+
+        <button id="save-button" type="button">Save Replay</button>
+        <p id="message" class="message"></p>
+
+        <h2>Saved Replays</h2>
+        <div id="replay-list" class="replay-list"></div>
+      </aside>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

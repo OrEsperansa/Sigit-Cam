@@ -1,0 +1,428 @@
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import re
+import shutil
+import signal
+import subprocess
+from dataclasses import dataclass, field
+from functools import lru_cache
+from datetime import datetime
+from pathlib import Path
+
+from .config import Settings
+
+
+LOGGER = logging.getLogger("instant_replay.ffmpeg")
+
+
+@dataclass(frozen=True)
+class DeviceInventory:
+    video: list[str] = field(default_factory=list)
+    audio: list[str] = field(default_factory=list)
+    error: str | None = None
+
+
+def list_dshow_devices(ffmpeg_path: str) -> DeviceInventory:
+    command = [
+        ffmpeg_path,
+        "-hide_banner",
+        "-list_devices",
+        "true",
+        "-f",
+        "dshow",
+        "-i",
+        "dummy",
+    ]
+
+    try:
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except FileNotFoundError:
+        discovered = discover_ffmpeg_path()
+        if discovered and discovered != ffmpeg_path:
+            return list_dshow_devices(discovered)
+        return DeviceInventory(error=f"{ffmpeg_path!r} was not found on PATH")
+    except subprocess.TimeoutExpired:
+        return DeviceInventory(error="FFmpeg device detection timed out")
+
+    video: list[str] = []
+    audio: list[str] = []
+    section: str | None = None
+    device_pattern = re.compile(r'"([^"]+)"')
+
+    for line in result.stderr.splitlines():
+        lower = line.lower()
+        if "directshow video devices" in lower:
+            section = "video"
+            continue
+        if "directshow audio devices" in lower:
+            section = "audio"
+            continue
+
+        match = device_pattern.search(line)
+        if not match or not section:
+            continue
+        name = match.group(1)
+        if name.startswith("@device_"):
+            continue
+        if section == "video":
+            video.append(name)
+        else:
+            audio.append(name)
+
+    return DeviceInventory(video=video, audio=audio)
+
+
+@lru_cache(maxsize=1)
+def discover_ffmpeg_path() -> str | None:
+    path_match = shutil.which("ffmpeg")
+    if path_match:
+        return path_match
+
+    local_app_data = Path(os.getenv("LOCALAPPDATA", ""))
+    program_files = Path(os.getenv("ProgramFiles", ""))
+    program_files_x86 = Path(os.getenv("ProgramFiles(x86)", ""))
+    user_profile = Path(os.getenv("USERPROFILE", ""))
+
+    candidates = [
+        program_files / "Gyan" / "FFmpeg" / "bin" / "ffmpeg.exe",
+        program_files / "ffmpeg" / "bin" / "ffmpeg.exe",
+        program_files_x86 / "Gyan" / "FFmpeg" / "bin" / "ffmpeg.exe",
+        local_app_data / "Microsoft" / "WinGet" / "Packages" / "Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe" / "ffmpeg-8.0-full_build" / "bin" / "ffmpeg.exe",
+        local_app_data / "Programs" / "LNV" / "Stremio-4" / "ffmpeg.exe",
+        user_profile / "scoop" / "shims" / "ffmpeg.exe",
+        Path("C:/ffmpeg/bin/ffmpeg.exe"),
+    ]
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+class CaptureProcess:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.process: subprocess.Popen[str] | None = None
+        self.selected_video_device: str | None = None
+        self.selected_audio_device: str | None = None
+        self.devices = DeviceInventory()
+        self.last_error: str | None = None
+
+    def start(self) -> None:
+        if self.process and self.process.poll() is None:
+            return
+
+        self._ensure_dirs()
+        self._clear_live_hls()
+        try:
+            command = self._build_command()
+        except Exception as exc:
+            self.last_error = str(exc)
+            raise
+
+        LOGGER.info("Starting FFmpeg: %s", " ".join(command))
+        try:
+            self.process = subprocess.Popen(
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
+            )
+            self.last_error = None
+        except FileNotFoundError as exc:
+            discovered = discover_ffmpeg_path()
+            if discovered and discovered != command[0]:
+                command[0] = discovered
+                self.process = subprocess.Popen(
+                    command,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
+                )
+                self.last_error = None
+                asyncio.create_task(self._log_stderr())
+                return
+            self.last_error = f"{self.settings.ffmpeg_path!r} was not found on PATH"
+            raise RuntimeError(self.last_error) from exc
+        asyncio.create_task(self._log_stderr())
+
+    def stop(self) -> None:
+        if not self.process or self.process.poll() is not None:
+            return
+
+        LOGGER.info("Stopping FFmpeg")
+        if os.name == "nt":
+            self.process.send_signal(signal.CTRL_BREAK_EVENT)
+        else:
+            self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+
+    def is_running(self) -> bool:
+        return self.process is not None and self.process.poll() is None
+
+    def status(self) -> dict[str, object]:
+        return {
+            "running": self.is_running(),
+            "selected_video_device": self.selected_video_device,
+            "selected_audio_device": self.selected_audio_device,
+            "available_video_devices": self.devices.video,
+            "available_audio_devices": self.devices.audio,
+            "device_error": self.devices.error,
+            "last_error": self.last_error,
+        }
+
+    async def _log_stderr(self) -> None:
+        if not self.process or not self.process.stderr:
+            return
+        while True:
+            line = await asyncio.to_thread(self.process.stderr.readline)
+            if not line:
+                break
+            LOGGER.info(line.rstrip())
+
+    def _ensure_dirs(self) -> None:
+        self.settings.chunk_dir.mkdir(parents=True, exist_ok=True)
+        self.settings.replay_dir.mkdir(parents=True, exist_ok=True)
+        self.settings.hls_dir.mkdir(parents=True, exist_ok=True)
+
+    def _clear_live_hls(self) -> None:
+        for item in self.settings.hls_dir.glob("*"):
+            if item.is_file():
+                item.unlink()
+
+    def _build_command(self) -> list[str]:
+        input_args = self._input_args()
+        audio_map = self._audio_map()
+        keyframe_interval = max(self.settings.fps * self.settings.chunk_seconds, 1)
+        hls_path = self.settings.hls_dir / "live.m3u8"
+        chunk_pattern = self.settings.chunk_dir / "chunk_%Y%m%d_%H%M%S.mp4"
+
+        return [
+            self.settings.ffmpeg_path,
+            "-hide_banner",
+            "-loglevel",
+            "warning",
+            *input_args,
+            "-map",
+            "0:v:0",
+            "-map",
+            audio_map,
+            "-c:v",
+            self.settings.video_codec,
+            "-preset",
+            "veryfast",
+            "-tune",
+            "zerolatency",
+            "-pix_fmt",
+            "yuv420p",
+            "-r",
+            str(self.settings.fps),
+            "-g",
+            str(keyframe_interval),
+            "-sc_threshold",
+            "0",
+            "-c:a",
+            self.settings.audio_codec,
+            "-b:a",
+            "128k",
+            "-f",
+            "hls",
+            "-hls_time",
+            str(self.settings.hls_segment_seconds),
+            "-hls_list_size",
+            "4",
+            "-hls_flags",
+            "delete_segments+append_list+omit_endlist",
+            str(hls_path),
+            "-map",
+            "0:v:0",
+            "-map",
+            audio_map,
+            "-c:v",
+            self.settings.video_codec,
+            "-preset",
+            "veryfast",
+            "-tune",
+            "zerolatency",
+            "-pix_fmt",
+            "yuv420p",
+            "-r",
+            str(self.settings.fps),
+            "-g",
+            str(keyframe_interval),
+            "-sc_threshold",
+            "0",
+            "-c:a",
+            self.settings.audio_codec,
+            "-b:a",
+            "128k",
+            "-f",
+            "segment",
+            "-segment_time",
+            str(self.settings.chunk_seconds),
+            "-reset_timestamps",
+            "1",
+            "-strftime",
+            "1",
+            "-segment_format",
+            "mp4",
+            str(chunk_pattern),
+        ]
+
+    def _input_args(self) -> list[str]:
+        mode = self.settings.input_mode
+        if mode == "rtsp":
+            if not self.settings.rtsp_url:
+                raise RuntimeError("RTSP_URL is required when INPUT_MODE=rtsp")
+            return [
+                "-rtsp_transport",
+                "tcp",
+                "-i",
+                self.settings.rtsp_url,
+            ]
+
+        if mode == "dshow":
+            video_device, audio_device = self._resolve_dshow_devices()
+            source = f"video={video_device}"
+            if audio_device:
+                source += f":audio={audio_device}"
+            return [
+                "-f",
+                "dshow",
+                "-video_size",
+                self.settings.video_resolution,
+                "-framerate",
+                str(self.settings.fps),
+                "-i",
+                source,
+            ]
+
+        if mode == "v4l2":
+            video = self.settings.video_device or "/dev/video0"
+            args = [
+                "-f",
+                "v4l2",
+                "-video_size",
+                self.settings.video_resolution,
+                "-framerate",
+                str(self.settings.fps),
+                "-i",
+                video,
+            ]
+            if self.settings.audio_device:
+                args.extend(["-f", "alsa", "-i", self.settings.audio_device])
+            return args
+
+        raise RuntimeError(f"Unsupported INPUT_MODE={mode!r}")
+
+    def _audio_map(self) -> str:
+        if self.settings.input_mode == "v4l2" and self.settings.audio_device:
+            return "1:a:0?"
+        return "0:a:0?"
+
+    def _resolve_dshow_devices(self) -> tuple[str, str | None]:
+        if self.settings.video_device:
+            self.selected_video_device = self.settings.video_device
+            self.selected_audio_device = self.settings.audio_device or None
+            return self.settings.video_device, self.settings.audio_device or None
+
+        if not self.settings.auto_detect_devices:
+            raise RuntimeError("VIDEO_DEVICE is required when AUTO_DETECT_DEVICES=0")
+
+        self.devices = list_dshow_devices(self.settings.ffmpeg_path)
+        if self.devices.error:
+            raise RuntimeError(self.devices.error)
+        if not self.devices.video:
+            raise RuntimeError("No DirectShow video devices were detected")
+
+        self.selected_video_device = self.devices.video[0]
+        self.selected_audio_device = self.settings.audio_device or (self.devices.audio[0] if self.devices.audio else None)
+        LOGGER.info(
+            "Auto-selected DirectShow devices: video=%r audio=%r",
+            self.selected_video_device,
+            self.selected_audio_device,
+        )
+        return self.selected_video_device, self.selected_audio_device
+
+
+async def cleanup_old_chunks(settings: Settings) -> None:
+    cutoff = datetime.now().timestamp() - settings.max_buffer_seconds
+    for chunk in settings.chunk_dir.glob("chunk_*.mp4"):
+        try:
+            if chunk.stat().st_mtime < cutoff:
+                chunk.unlink()
+        except FileNotFoundError:
+            continue
+
+
+def recent_chunks(settings: Settings, seconds: int) -> list[Path]:
+    cutoff = datetime.now().timestamp() - seconds
+    chunks = [
+        path
+        for path in settings.chunk_dir.glob("chunk_*.mp4")
+        if path.is_file() and path.stat().st_size > 0 and path.stat().st_mtime >= cutoff
+    ]
+    return sorted(chunks, key=lambda path: path.stat().st_mtime)
+
+
+async def save_replay(settings: Settings, seconds: int | None = None) -> Path:
+    duration = seconds or settings.replay_seconds
+    chunks = recent_chunks(settings, duration)
+    if not chunks:
+        raise RuntimeError("No buffered chunks are available yet")
+
+    settings.replay_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    output = settings.replay_dir / f"replay_{stamp}.mp4"
+    concat_file = settings.data_dir / f"concat_{stamp}.txt"
+
+    concat_file.write_text(
+        "".join(f"file '{chunk.as_posix()}'\n" for chunk in chunks),
+        encoding="utf-8",
+    )
+
+    command = [
+        settings.ffmpeg_path,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        str(concat_file),
+        "-c",
+        "copy",
+        "-movflags",
+        "+faststart",
+        str(output),
+    ]
+
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await process.communicate()
+        if process.returncode != 0:
+            raise RuntimeError(stderr.decode("utf-8", errors="replace").strip())
+        return output
+    finally:
+        concat_file.unlink(missing_ok=True)
