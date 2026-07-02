@@ -17,7 +17,7 @@ from .ffmpeg import CaptureProcess, cleanup_old_chunks, discover_ffmpeg_path, ff
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-APP_VERSION = "offline-hls-v3"
+APP_VERSION = "offline-hls-v4"
 NO_STORE_HEADERS = {
     "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
     "Pragma": "no-cache",
@@ -26,6 +26,8 @@ NO_STORE_HEADERS = {
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 capture = CaptureProcess(settings)
+replay_lock = asyncio.Lock()
+replay_task: asyncio.Task[Path] | None = None
 
 
 async def cleanup_loop() -> None:
@@ -162,11 +164,20 @@ async def live_segment(segment_name: str):
 
 @app.post("/api/replays")
 async def create_replay():
+    global replay_task
+
+    async with replay_lock:
+        if replay_task is None or replay_task.done():
+            replay_task = asyncio.create_task(save_replay(settings))
+            deduplicated = False
+        else:
+            deduplicated = True
+
     try:
-        output = await save_replay(settings)
+        output = await replay_task
     except Exception as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return {"file": output.name, "url": f"/replays/{output.name}"}
+    return {"file": output.name, "url": f"/replays/{output.name}", "deduplicated": deduplicated}
 
 
 @app.get("/api/replays")

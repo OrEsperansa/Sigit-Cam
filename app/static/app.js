@@ -92,14 +92,29 @@ async function setupPlayer() {
     }
 
     showStreamStatus("Local HLS player failed to load");
+  } catch (error) {
+    resetPlayer();
+    showStreamStatus(`Live player error: ${error.message}`);
   } finally {
     setupInFlight = false;
   }
 }
 
 async function refreshStatus() {
-  const response = await fetch("/api/status");
-  const status = await response.json();
+  let status;
+  try {
+    const response = await fetch(`/api/status?ts=${Date.now()}`, { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`status ${response.status}`);
+    }
+    status = await response.json();
+  } catch (error) {
+    captureDot.classList.remove("running");
+    captureLabel.textContent = "Server unreachable";
+    resetPlayer();
+    showStreamStatus(`Cannot reach server: ${error.message}`);
+    return;
+  }
   lastStatus = status;
   captureDot.classList.toggle("running", status.capture_running);
   captureLabel.textContent = status.capture_running ? "Capture running" : "Capture stopped";
@@ -154,7 +169,7 @@ saveButton.addEventListener("click", async () => {
     if (!response.ok) {
       throw new Error(data.detail || "Replay save failed");
     }
-    message.textContent = `Saved ${data.file}`;
+    message.textContent = data.deduplicated ? `Already saving, linked ${data.file}` : `Saved ${data.file}`;
     await refreshReplays();
   } catch (error) {
     message.textContent = error.message;
