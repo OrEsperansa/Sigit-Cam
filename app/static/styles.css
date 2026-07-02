@@ -36,6 +36,10 @@ video {
   border: 1px solid #272d35;
 }
 
+video.hidden {
+  display: none;
+}
+
 .live-overlay {
   position: absolute;
   left: 50%;

@@ -10,8 +10,8 @@
   <body>
     <main class="shell">
       <section class="viewer">
-        <video id="live-video" autoplay muted playsinline controls></video>
-        <div id="live-overlay" class="live-overlay">Waiting for camera</div>
+        <video id="live-video" class="hidden" autoplay muted playsinline controls></video>
+        <div id="live-overlay" class="live-overlay">Checking stream</div>
       </section>
 
       <aside class="panel">
@@ -44,6 +44,6 @@
       </aside>
     </main>
 
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v={{ app_version }}"></script>
   </body>
 </html>

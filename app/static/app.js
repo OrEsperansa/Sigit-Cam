@@ -9,63 +9,98 @@ const deviceInfo = document.querySelector("#device-info");
 const liveOverlay = document.querySelector("#live-overlay");
 let hlsPlayer = null;
 let playerStarted = false;
+let setupInFlight = false;
+let lastStatus = null;
 
 async function livePlaylistExists() {
   try {
-    const response = await fetch(`/static/hls/live.m3u8?ts=${Date.now()}`, { cache: "no-store" });
+    const response = await fetch(`/live/live.m3u8?ts=${Date.now()}`, { cache: "no-store" });
     return response.ok;
   } catch {
     return false;
   }
 }
 
+function showStreamStatus(text) {
+  liveOverlay.textContent = text;
+  liveOverlay.classList.remove("hidden");
+}
+
+function showVideo() {
+  video.classList.remove("hidden");
+  liveOverlay.classList.add("hidden");
+}
+
+function hideVideo() {
+  video.classList.add("hidden");
+}
+
+function resetPlayer() {
+  if (hlsPlayer) {
+    hlsPlayer.destroy();
+    hlsPlayer = null;
+  }
+  video.removeAttribute("src");
+  video.load();
+  playerStarted = false;
+  hideVideo();
+}
+
 async function setupPlayer() {
-  if (playerStarted) {
+  if (playerStarted || setupInFlight) {
     return;
   }
+  setupInFlight = true;
 
-  if (!(await livePlaylistExists())) {
-    liveOverlay.textContent = "Waiting for live stream";
-    liveOverlay.classList.remove("hidden");
-    return;
-  }
+  try {
+    if (!(await livePlaylistExists())) {
+      showStreamStatus("Waiting for live stream");
+      hideVideo();
+      return;
+    }
 
-  const source = `/static/hls/live.m3u8?ts=${Date.now()}`;
-  if (video.canPlayType("application/vnd.apple.mpegurl")) {
-    video.src = source;
-    playerStarted = true;
-    liveOverlay.classList.add("hidden");
-    return;
-  }
+    const source = `/live/live.m3u8?ts=${Date.now()}`;
+    if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      video.src = source;
+      playerStarted = true;
+      showVideo();
+      video.play().catch(() => {});
+      return;
+    }
 
-  if (window.Hls?.isSupported()) {
-    hlsPlayer = new Hls({
-      liveSyncDurationCount: 2,
-      lowLatencyMode: true,
-    });
-    hlsPlayer.on(Hls.Events.ERROR, (_event, data) => {
-      if (!data.fatal) {
-        return;
-      }
-      hlsPlayer.destroy();
-      hlsPlayer = null;
-      playerStarted = false;
-      liveOverlay.textContent = "Reconnecting live stream";
-      liveOverlay.classList.remove("hidden");
-      setTimeout(setupPlayer, 1500);
-    });
-    hlsPlayer.loadSource(source);
-    hlsPlayer.attachMedia(video);
-    playerStarted = true;
-    liveOverlay.classList.add("hidden");
-  } else {
-    message.textContent = "This browser cannot play the live stream.";
+    if (window.Hls?.isSupported()) {
+      hlsPlayer = new Hls({
+        liveSyncDurationCount: 2,
+        lowLatencyMode: true,
+      });
+      hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => {
+        showVideo();
+        video.play().catch(() => {});
+      });
+      hlsPlayer.on(Hls.Events.ERROR, (_event, data) => {
+        if (!data.fatal) {
+          return;
+        }
+        resetPlayer();
+        showStreamStatus("Reconnecting live stream");
+        setTimeout(setupPlayer, 1500);
+      });
+      hlsPlayer.loadSource(source);
+      hlsPlayer.attachMedia(video);
+      playerStarted = true;
+      return;
+    }
+
+    showStreamStatus("This browser cannot play the live stream");
+  } finally {
+    setupInFlight = false;
   }
 }
 
 async function refreshStatus() {
   const response = await fetch("/api/status");
   const status = await response.json();
+  lastStatus = status;
   captureDot.classList.toggle("running", status.capture_running);
   captureLabel.textContent = status.capture_running ? "Capture running" : "Capture stopped";
   buffered.textContent = `${status.buffered_seconds_estimate} sec`;
@@ -74,14 +109,15 @@ async function refreshStatus() {
   const audioDevice = capture.selected_audio_device || "No microphone selected";
   const error = capture.last_error || capture.device_error || "";
   deviceInfo.textContent = error ? `${videoDevice} / ${audioDevice} - ${error}` : `${videoDevice} / ${audioDevice}`;
+  const warning = status.stream_warning || "";
   if (!status.capture_running) {
-    liveOverlay.textContent = error || "Waiting for camera";
-    liveOverlay.classList.remove("hidden");
+    resetPlayer();
+    showStreamStatus(error || "Waiting for camera");
   } else if (!status.live_hls_ready) {
-    liveOverlay.textContent = "Starting live stream";
-    liveOverlay.classList.remove("hidden");
+    resetPlayer();
+    showStreamStatus(warning || "Camera detected, waiting for video");
   }
-  if (status.capture_running || status.live_hls_ready) {
+  if (status.live_hls_ready) {
     setupPlayer();
   }
 }
