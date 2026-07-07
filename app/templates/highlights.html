@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Highlights - Instant Replay Camera</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <nav class="top-nav" aria-label="Primary navigation">
+      <a class="brand" href="/">Instant Replay</a>
+      <div class="nav-links">
+        <a class="nav-link" href="/">Camera</a>
+        <a class="nav-link active" href="/highlights">Highlights</a>
+      </div>
+    </nav>
+
+    <main class="highlights-shell">
+      <section class="highlight-player-section">
+        <video id="highlight-player" class="highlight-player hidden" controls preload="metadata"></video>
+        <div id="highlight-empty" class="highlight-empty">Select a replay to view it here.</div>
+        <div class="highlight-details">
+          <h1 id="highlight-title">Highlights</h1>
+          <p id="highlight-meta">Saved replays are loaded from this machine.</p>
+        </div>
+      </section>
+
+      <aside class="highlight-list-panel">
+        <div class="highlight-list-header">
+          <h2>Saved Replays</h2>
+          <button id="refresh-highlights" class="secondary-button" type="button">Refresh</button>
+        </div>
+        <div id="highlight-list" class="highlight-list"></div>
+      </aside>
+    </main>
+
+    <script src="/static/highlights.js?v={{ app_version }}"></script>
+  </body>
+</html>

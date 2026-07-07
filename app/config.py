@@ -18,6 +18,13 @@ def _int_env(name: str, default: int) -> int:
     return int(value)
 
 
+def _path_env(name: str) -> Path | None:
+    value = os.getenv(name)
+    if value is None or value.strip() == "":
+        return None
+    return Path(value)
+
+
 @dataclass(frozen=True)
 class Settings:
     host: str = os.getenv("HOST", "0.0.0.0")
@@ -28,6 +35,7 @@ class Settings:
     video_device: str = os.getenv("VIDEO_DEVICE", "")
     audio_device: str = os.getenv("AUDIO_DEVICE", "")
     rtsp_url: str = os.getenv("RTSP_URL", "")
+    rtsp_transport: str = os.getenv("RTSP_TRANSPORT", "tcp").lower()
 
     replay_minutes: int = _int_env("REPLAY_MINUTES", 3)
     max_buffer_minutes: int = _int_env("MAX_BUFFER_MINUTES", 5)
@@ -35,12 +43,17 @@ class Settings:
     video_resolution: str = os.getenv("VIDEO_RESOLUTION", "1920x1080")
     fps: int = _int_env("FPS", 30)
     video_codec: str = os.getenv("VIDEO_CODEC", "libx264")
+    video_pixel_format: str = os.getenv("VIDEO_PIXEL_FORMAT", "auto").lower()
     audio_codec: str = os.getenv("AUDIO_CODEC", "aac")
     ffmpeg_path: str = os.getenv("FFMPEG_PATH", "")
     live_fps: int = _int_env("LIVE_FPS", 8)
     live_width: int = _int_env("LIVE_WIDTH", 960)
     live_jpeg_quality: int = _int_env("LIVE_JPEG_QUALITY", 8)
-    dshow_rtbufsize: str = os.getenv("DSHOW_RTBUFSIZE", "512M")
+    dshow_rtbufsize: str = os.getenv("DSHOW_RTBUFSIZE", "32M")
+    low_latency_capture: bool = os.getenv("LOW_LATENCY_CAPTURE", "1").lower() not in {"0", "false", "no"}
+    replay_finalize_wait_seconds: int = _int_env("REPLAY_FINALIZE_WAIT_SECONDS", 7)
+    replay_audio_mode: str = os.getenv("REPLAY_AUDIO_MODE", "repair").lower()
+    replay_backup_dir: Path | None = _path_env("REPLAY_BACKUP_DIR")
 
     data_dir: Path = BASE_DIR / "data"
     chunk_dir: Path = BASE_DIR / "data" / "chunks"

@@ -26,6 +26,13 @@ class DeviceInventory:
     error: str | None = None
 
 
+@dataclass(frozen=True)
+class ReplaySaveResult:
+    output: Path
+    backup_path: Path | None = None
+    backup_error: str | None = None
+
+
 @lru_cache(maxsize=1)
 def ffmpeg_discovery_error() -> str | None:
     if discover_ffmpeg_path():
@@ -343,14 +350,7 @@ class CaptureProcess:
             "0:v:0",
             "-map",
             audio_map,
-            "-c:v",
-            self.settings.video_codec,
-            "-preset",
-            "veryfast",
-            "-tune",
-            "zerolatency",
-            "-pix_fmt",
-            "yuv420p",
+            *self._encoder_args(),
             "-r",
             str(self.settings.fps),
             "-g",
@@ -374,14 +374,31 @@ class CaptureProcess:
             str(chunk_pattern),
         ]
 
+    def _encoder_args(self) -> list[str]:
+        codec = self.settings.video_codec.lower()
+        args = ["-c:v", self.settings.video_codec, "-preset", "veryfast"]
+        if codec in {"libx264", "libx265"}:
+            args.extend(["-tune", "zerolatency"])
+        args.extend(["-pix_fmt", self._video_pixel_format()])
+        return args
+
+    def _video_pixel_format(self) -> str:
+        configured = self.settings.video_pixel_format
+        if configured and configured != "auto":
+            return configured
+        if self.settings.video_codec.lower() == "h264_qsv":
+            return "nv12"
+        return "yuv420p"
+
     def _input_args(self) -> list[str]:
         mode = self.settings.input_mode
         if mode == "rtsp":
             if not self.settings.rtsp_url:
                 raise RuntimeError("RTSP_URL is required when INPUT_MODE=rtsp")
             return [
+                *self._low_latency_input_args(),
                 "-rtsp_transport",
-                "tcp",
+                self.settings.rtsp_transport,
                 "-i",
                 self.settings.rtsp_url,
             ]
@@ -392,6 +409,7 @@ class CaptureProcess:
             if audio_device:
                 source += f":audio={audio_device}"
             return [
+                *self._low_latency_input_args(),
                 "-f",
                 "dshow",
                 "-rtbufsize",
@@ -407,6 +425,7 @@ class CaptureProcess:
         if mode == "v4l2":
             video = self.settings.video_device or "/dev/video0"
             args = [
+                *self._low_latency_input_args(),
                 "-f",
                 "v4l2",
                 "-video_size",
@@ -421,6 +440,20 @@ class CaptureProcess:
             return args
 
         raise RuntimeError(f"Unsupported INPUT_MODE={mode!r}")
+
+    def _low_latency_input_args(self) -> list[str]:
+        if not self.settings.low_latency_capture:
+            return []
+        return [
+            "-fflags",
+            "nobuffer",
+            "-flags",
+            "low_delay",
+            "-probesize",
+            "32",
+            "-analyzeduration",
+            "0",
+        ]
 
     def _audio_map(self) -> str:
         if self.settings.input_mode == "v4l2" and self.settings.audio_device:
@@ -472,11 +505,111 @@ def recent_chunks(settings: Settings, seconds: int) -> list[Path]:
     return sorted(chunks, key=lambda path: path.stat().st_mtime)
 
 
-async def save_replay(settings: Settings, seconds: int | None = None) -> Path:
-    duration = seconds or settings.replay_seconds
-    chunks = recent_chunks(settings, duration)
+def recent_completed_chunks(settings: Settings, seconds: int) -> list[Path]:
+    chunks = recent_chunks(settings, seconds)
+    if len(chunks) < 2:
+        return chunks
+
+    newest = chunks[-1]
+    newest_age = datetime.now().timestamp() - newest.stat().st_mtime
+    active_cutoff = max(settings.chunk_seconds + 2, 2)
+    if newest_age < active_cutoff:
+        return chunks[:-1]
+    return chunks
+
+
+async def wait_for_current_chunk_to_finish(settings: Settings) -> None:
+    wait_seconds = max(settings.replay_finalize_wait_seconds, 0)
+    if wait_seconds == 0:
+        return
+
+    chunks = recent_chunks(settings, settings.max_buffer_seconds)
     if not chunks:
-        raise RuntimeError("No buffered chunks are available yet")
+        return
+
+    initial_newest = chunks[-1]
+    deadline = monotonic() + wait_seconds
+    while monotonic() < deadline:
+        await asyncio.sleep(0.25)
+        current_chunks = recent_chunks(settings, settings.max_buffer_seconds)
+        if not current_chunks:
+            return
+        newest = current_chunks[-1]
+        if newest != initial_newest:
+            return
+        newest_age = datetime.now().timestamp() - newest.stat().st_mtime
+        if newest_age >= settings.chunk_seconds + 1:
+            return
+
+
+def _copy_replay_to_backup(settings: Settings, output: Path) -> tuple[Path | None, str | None]:
+    if settings.replay_backup_dir is None:
+        return None, None
+
+    try:
+        settings.replay_backup_dir.mkdir(parents=True, exist_ok=True)
+        backup_path = settings.replay_backup_dir / output.name
+        shutil.copy2(output, backup_path)
+        return backup_path, None
+    except OSError as exc:
+        message = f"Failed to copy replay to backup dir {settings.replay_backup_dir}: {exc}"
+        LOGGER.exception(message)
+        return None, message
+
+
+def _replay_concat_command(settings: Settings, concat_file: Path, output: Path) -> list[str]:
+    base = [
+        require_ffmpeg_path(),
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-fflags",
+        "+genpts",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        str(concat_file),
+    ]
+
+    if settings.replay_audio_mode == "copy":
+        return [
+            *base,
+            "-c",
+            "copy",
+            "-movflags",
+            "+faststart",
+            str(output),
+        ]
+
+    return [
+        *base,
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a:0?",
+        "-c:v",
+        "copy",
+        "-c:a",
+        settings.audio_codec,
+        "-b:a",
+        "128k",
+        "-af",
+        "aresample=async=1:first_pts=0",
+        "-avoid_negative_ts",
+        "make_zero",
+        "-movflags",
+        "+faststart",
+        str(output),
+    ]
+
+async def save_replay(settings: Settings, seconds: int | None = None) -> ReplaySaveResult:
+    duration = seconds or settings.replay_seconds
+    await wait_for_current_chunk_to_finish(settings)
+    chunks = recent_completed_chunks(settings, duration)
+    if not chunks:
+        raise RuntimeError("No completed buffered chunks are available yet")
 
     settings.replay_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -488,23 +621,8 @@ async def save_replay(settings: Settings, seconds: int | None = None) -> Path:
         encoding="utf-8",
     )
 
-    command = [
-        require_ffmpeg_path(),
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-f",
-        "concat",
-        "-safe",
-        "0",
-        "-i",
-        str(concat_file),
-        "-c",
-        "copy",
-        "-movflags",
-        "+faststart",
-        str(output),
-    ]
+    command = _replay_concat_command(settings, concat_file, output)
+
 
     try:
         process = await asyncio.create_subprocess_exec(
@@ -515,6 +633,7 @@ async def save_replay(settings: Settings, seconds: int | None = None) -> Path:
         _, stderr = await process.communicate()
         if process.returncode != 0:
             raise RuntimeError(stderr.decode("utf-8", errors="replace").strip())
-        return output
+        backup_path, backup_error = await asyncio.to_thread(_copy_replay_to_backup, settings, output)
+        return ReplaySaveResult(output=output, backup_path=backup_path, backup_error=backup_error)
     finally:
         concat_file.unlink(missing_ok=True)

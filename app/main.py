@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .config import settings
-from .ffmpeg import CaptureProcess, cleanup_old_chunks, discover_ffmpeg_path, ffmpeg_discovery_error, list_dshow_devices, recent_chunks, save_replay
+from .ffmpeg import CaptureProcess, ReplaySaveResult, cleanup_old_chunks, discover_ffmpeg_path, ffmpeg_discovery_error, list_dshow_devices, recent_chunks, save_replay
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -22,7 +22,7 @@ APP_VERSION = "mjpeg-live-v3"
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 capture = CaptureProcess(settings)
 replay_lock = asyncio.Lock()
-replay_task: asyncio.Task[Path] | None = None
+replay_task: asyncio.Task[ReplaySaveResult] | None = None
 
 
 async def cleanup_loop() -> None:
@@ -73,6 +73,16 @@ async def index(request: Request):
         },
     )
 
+
+@app.get("/highlights", response_class=HTMLResponse)
+async def highlights(request: Request):
+    return templates.TemplateResponse(
+        "highlights.html",
+        {
+            "request": request,
+            "app_version": APP_VERSION,
+        },
+    )
 
 @app.get("/api/status")
 async def status():
@@ -181,10 +191,16 @@ async def create_replay():
             deduplicated = True
 
     try:
-        output = await replay_task
+        result = await replay_task
     except Exception as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return {"file": output.name, "url": f"/replays/{output.name}", "deduplicated": deduplicated}
+    return {
+        "file": result.output.name,
+        "url": f"/replays/{result.output.name}",
+        "deduplicated": deduplicated,
+        "backup_file": str(result.backup_path) if result.backup_path else None,
+        "backup_error": result.backup_error,
+    }
 
 
 @app.get("/api/replays")

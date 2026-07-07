@@ -72,13 +72,18 @@ Environment variables:
 REPLAY_MINUTES=3
 MAX_BUFFER_MINUTES=5
 CHUNK_SECONDS=5
+REPLAY_FINALIZE_WAIT_SECONDS=7
+REPLAY_AUDIO_MODE=repair
 LIVE_FPS=8
 LIVE_WIDTH=960
 LIVE_JPEG_QUALITY=8
-DSHOW_RTBUFSIZE=512M
+DSHOW_RTBUFSIZE=32M
+LOW_LATENCY_CAPTURE=1
+RTSP_TRANSPORT=tcp
 VIDEO_RESOLUTION=1920x1080
 FPS=30
 VIDEO_CODEC=libx264
+VIDEO_PIXEL_FORMAT=auto
 AUDIO_CODEC=aac
 INPUT_MODE=dshow
 AUTO_DETECT_DEVICES=1
@@ -91,6 +96,14 @@ RTSP_URL=
 
 You can also copy `.env.example` to `.env`; the app loads `.env` automatically on startup.
 
+
+Optional backup share:
+
+```text
+REPLAY_BACKUP_DIR=\\server\share\SigitCamReplays
+```
+
+When `REPLAY_BACKUP_DIR` is set, each replay is first saved locally under `data/replays/` and then copied to the configured backup directory. For Intel Quick Sync, set `VIDEO_CODEC=h264_qsv`; the default `VIDEO_PIXEL_FORMAT=auto` selects `nv12`, which is compatible with `h264_qsv`. The default `REPLAY_AUDIO_MODE=repair` copies video while rebuilding AAC audio timestamps during replay save; use `REPLAY_AUDIO_MODE=copy` to restore the old no-reencode behavior.
 Output folders are created automatically:
 
 ```text

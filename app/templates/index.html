@@ -7,7 +7,15 @@
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
-    <main class="shell">
+    <nav class="top-nav" aria-label="Primary navigation">
+      <a class="brand" href="/">Instant Replay</a>
+      <div class="nav-links">
+        <a class="nav-link active" href="/">Camera</a>
+        <a class="nav-link" href="/highlights">Highlights</a>
+      </div>
+    </nav>
+
+    <main class="shell camera-shell">
       <section class="viewer">
         <img id="live-image" class="hidden" alt="Live stream" />
         <div id="live-overlay" class="live-overlay">Checking stream</div>
@@ -38,8 +46,11 @@
         <button id="save-button" type="button">Save Replay</button>
         <p id="message" class="message"></p>
 
-        <h2>Saved Replays</h2>
-        <div id="replay-list" class="replay-list"></div>
+        <div class="panel-heading-row">
+          <h2>Recent Replays</h2>
+          <a class="text-link" href="/highlights">Open manager</a>
+        </div>
+        <div id="replay-list" class="replay-list compact"></div>
       </aside>
     </main>
 
