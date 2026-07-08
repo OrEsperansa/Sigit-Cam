@@ -338,7 +338,7 @@ class CaptureProcess:
             "0:v:0",
             "-an",
             "-vf",
-            f"fps={self.settings.live_fps},scale={self.settings.live_width}:-2",
+            self._live_video_filter(),
             "-q:v",
             str(self.settings.live_jpeg_quality),
             "-f",
@@ -350,6 +350,7 @@ class CaptureProcess:
             "0:v:0",
             "-map",
             audio_map,
+            *self._recording_video_filter_args(),
             *self._encoder_args(),
             "-r",
             str(self.settings.fps),
@@ -373,6 +374,29 @@ class CaptureProcess:
             "mp4",
             str(chunk_pattern),
         ]
+
+    def _live_video_filter(self) -> str:
+        filters = []
+        rotation = self._rotation_filter()
+        if rotation:
+            filters.append(rotation)
+        filters.extend([
+            f"fps={self.settings.live_fps}",
+            f"scale={self.settings.live_width}:-2",
+        ])
+        return ",".join(filters)
+
+    def _recording_video_filter_args(self) -> list[str]:
+        rotation = self._rotation_filter()
+        if not rotation:
+            return []
+        return ["-vf", rotation]
+
+    def _rotation_filter(self) -> str:
+        degrees = self.settings.camera_rotation_degrees % 360
+        if abs(degrees) < 0.0001:
+            return ""
+        return f"rotate={degrees}*PI/180:ow=ceil(rotw(iw)/2)*2:oh=ceil(roth(ih)/2)*2:fillcolor=black"
 
     def _encoder_args(self) -> list[str]:
         codec = self.settings.video_codec.lower()

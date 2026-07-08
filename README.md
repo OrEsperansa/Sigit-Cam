@@ -80,6 +80,7 @@ LIVE_JPEG_QUALITY=8
 DSHOW_RTBUFSIZE=32M
 LOW_LATENCY_CAPTURE=1
 RTSP_TRANSPORT=tcp
+CAMERA_ROTATION_DEGREES=0
 VIDEO_RESOLUTION=1920x1080
 FPS=30
 VIDEO_CODEC=libx264
@@ -102,6 +103,8 @@ Optional backup share:
 ```text
 REPLAY_BACKUP_DIR=\\server\share\SigitCamReplays
 ```
+
+`CAMERA_ROTATION_DEGREES` rotates both the live browser view and newly recorded replay chunks. Use `90`, `180`, `270`, or any degree value; restart the app after changing it.
 
 When `REPLAY_BACKUP_DIR` is set, each replay is first saved locally under `data/replays/` and then copied to the configured backup directory. For Intel Quick Sync, set `VIDEO_CODEC=h264_qsv`; the default `VIDEO_PIXEL_FORMAT=auto` selects `nv12`, which is compatible with `h264_qsv`. The default `REPLAY_AUDIO_MODE=repair` copies video while rebuilding AAC audio timestamps during replay save; use `REPLAY_AUDIO_MODE=copy` to restore the old no-reencode behavior.
 Output folders are created automatically:

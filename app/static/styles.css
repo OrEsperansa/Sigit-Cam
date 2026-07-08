@@ -233,27 +233,13 @@ h2 {
   font-weight: 700;
 }
 
-.replay-list,
 .highlight-list {
   display: grid;
   gap: 8px;
 }
 
-.replay-list {
-  margin-top: 12px;
-}
 
-.replay {
-  display: block;
-  padding: 10px;
-  border: 1px solid #2a3038;
-  border-radius: 6px;
-  color: #e7eef7;
-  text-decoration: none;
-  overflow-wrap: anywhere;
-}
 
-.replay:hover,
 .highlight-item:hover {
   border-color: #4b8de8;
 }

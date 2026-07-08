@@ -1,7 +1,6 @@
 const liveImage = document.querySelector("#live-image");
 const saveButton = document.querySelector("#save-button");
 const message = document.querySelector("#message");
-const replayList = document.querySelector("#replay-list");
 const captureDot = document.querySelector("#capture-dot");
 const captureLabel = document.querySelector("#capture-label");
 const buffered = document.querySelector("#buffered");
@@ -95,28 +94,6 @@ async function refreshStatus() {
   setupPlayer();
 }
 
-async function refreshReplays() {
-  const response = await fetch("/api/replays");
-  const replays = await response.json();
-  replayList.innerHTML = "";
-
-  if (replays.length === 0) {
-    const empty = document.createElement("p");
-    empty.className = "empty";
-    empty.textContent = "No replays saved yet.";
-    replayList.append(empty);
-    return;
-  }
-
-  for (const replay of replays) {
-    const row = document.createElement("a");
-    row.href = replay.url;
-    row.className = "replay";
-    row.download = replay.file;
-    row.textContent = replay.file;
-    replayList.append(row);
-  }
-}
 
 saveButton.addEventListener("click", async () => {
   saveButton.disabled = true;
@@ -128,7 +105,6 @@ saveButton.addEventListener("click", async () => {
       throw new Error(data.detail || "Replay save failed");
     }
     message.textContent = data.deduplicated ? `Already saving, linked ${data.file}` : `Saved ${data.file}`;
-    await refreshReplays();
   } catch (error) {
     message.textContent = error.message;
   } finally {
@@ -137,6 +113,4 @@ saveButton.addEventListener("click", async () => {
 });
 
 refreshStatus();
-refreshReplays();
 setInterval(refreshStatus, 2000);
-setInterval(refreshReplays, 10000);

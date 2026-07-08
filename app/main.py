@@ -69,6 +69,7 @@ async def index(request: Request):
             "request": request,
             "replay_minutes": settings.replay_minutes,
             "chunk_seconds": settings.chunk_seconds,
+            "camera_rotation_degrees": settings.camera_rotation_degrees,
             "app_version": APP_VERSION,
         },
     )
@@ -106,6 +107,7 @@ async def status():
         "replay_minutes": settings.replay_minutes,
         "max_buffer_minutes": settings.max_buffer_minutes,
         "chunk_seconds": settings.chunk_seconds,
+        "camera_rotation_degrees": settings.camera_rotation_degrees,
         "buffered_chunks": len(chunks),
         "buffered_seconds_estimate": len(chunks) * settings.chunk_seconds,
         "stream_warning": stream_warning,

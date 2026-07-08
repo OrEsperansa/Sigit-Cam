@@ -18,6 +18,13 @@ def _int_env(name: str, default: int) -> int:
     return int(value)
 
 
+def _float_env(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None or value == "":
+        return default
+    return float(value)
+
+
 def _path_env(name: str) -> Path | None:
     value = os.getenv(name)
     if value is None or value.strip() == "":
@@ -41,6 +48,7 @@ class Settings:
     max_buffer_minutes: int = _int_env("MAX_BUFFER_MINUTES", 5)
     chunk_seconds: int = _int_env("CHUNK_SECONDS", 5)
     video_resolution: str = os.getenv("VIDEO_RESOLUTION", "1920x1080")
+    camera_rotation_degrees: float = _float_env("CAMERA_ROTATION_DEGREES", 0.0)
     fps: int = _int_env("FPS", 30)
     video_codec: str = os.getenv("VIDEO_CODEC", "libx264")
     video_pixel_format: str = os.getenv("VIDEO_PIXEL_FORMAT", "auto").lower()
