@@ -501,7 +501,7 @@ class CaptureProcess:
             return []
         return [
             "-fflags",
-            "nobuffer",
+            "+nobuffer+discardcorrupt",
             "-flags",
             "low_delay",
             "-probesize",

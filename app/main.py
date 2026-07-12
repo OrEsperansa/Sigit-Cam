@@ -33,7 +33,7 @@ class PollingAccessFilter(logging.Filter):
 
 
 logging.getLogger("uvicorn.access").addFilter(PollingAccessFilter())
-APP_VERSION = "mjpeg-live-v5"
+APP_VERSION = "mjpeg-live-v6"
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 capture = CaptureProcess(settings)

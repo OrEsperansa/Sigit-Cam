@@ -276,6 +276,9 @@ h2 {
   color: #aab3bf;
   text-align: center;
 }
+.highlight-empty.hidden {
+  display: none;
+}
 
 .highlight-details {
   display: grid;

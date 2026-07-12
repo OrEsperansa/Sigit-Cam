@@ -46,6 +46,7 @@ class CaptureCommandTests(unittest.TestCase):
         self.assertNotIn("-vsync", command)
         self.assertNotIn("-r", command)
         self.assertNotIn("-strftime", command)
+        self.assertIn("+nobuffer+discardcorrupt", CaptureProcess(settings)._low_latency_input_args())
         modes = [command[index + 1] for index, item in enumerate(command) if item == "-fps_mode"]
         self.assertEqual(modes, ["passthrough", "cfr"])
         self.assertTrue(command[-1].endswith("chunk_session_a_%06d.mp4"))
