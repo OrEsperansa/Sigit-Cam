@@ -17,7 +17,7 @@ from .ffmpeg import CaptureProcess, ReplaySaveResult, cleanup_old_chunks, discov
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-APP_VERSION = "mjpeg-live-v3"
+APP_VERSION = "mjpeg-live-v4"
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 capture = CaptureProcess(settings)

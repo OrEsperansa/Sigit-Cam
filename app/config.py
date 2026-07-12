@@ -47,7 +47,7 @@ class Settings:
     replay_minutes: int = _int_env("REPLAY_MINUTES", 3)
     max_buffer_minutes: int = _int_env("MAX_BUFFER_MINUTES", 5)
     chunk_seconds: int = _int_env("CHUNK_SECONDS", 5)
-    video_resolution: str = os.getenv("VIDEO_RESOLUTION", "1920x1080")
+    video_resolution: str = os.getenv("VIDEO_RESOLUTION", "1280x720")
     camera_rotation_degrees: float = _float_env("CAMERA_ROTATION_DEGREES", 0.0)
     fps: int = _int_env("FPS", 30)
     video_codec: str = os.getenv("VIDEO_CODEC", "libx264")

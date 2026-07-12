@@ -12,6 +12,7 @@ from functools import lru_cache
 from datetime import datetime
 from pathlib import Path
 from time import monotonic
+from uuid import uuid4
 
 from .config import BASE_DIR, Settings
 
@@ -113,7 +114,8 @@ def list_dshow_devices(ffmpeg_path: str) -> DeviceInventory:
         else:
             audio.append(name)
 
-    return DeviceInventory(video=video, audio=audio)
+    error = None if video else "No DirectShow video devices were detected"
+    return DeviceInventory(video=video, audio=audio, error=error)
 
 
 @lru_cache(maxsize=1)
@@ -195,6 +197,8 @@ class CaptureProcess:
         self.frame_count = 0
         self.frame_condition = asyncio.Condition()
         self.live_clients = 0
+        self.session_id: str | None = None
+        self._stderr_tail: list[str] = []
 
     def start(self) -> None:
         if self.process and self.process.poll() is None:
@@ -204,6 +208,8 @@ class CaptureProcess:
         self.latest_frame = None
         self.latest_frame_at = None
         self.frame_count = 0
+        self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid4().hex[:8]
+        self._stderr_tail = []
         try:
             command = self._build_command()
         except Exception as exc:
@@ -283,7 +289,14 @@ class CaptureProcess:
             line = await asyncio.to_thread(self.process.stderr.readline)
             if not line:
                 break
-            LOGGER.info(line.rstrip())
+            message = line.rstrip()
+            LOGGER.info(message)
+            self._stderr_tail.append(message)
+            self._stderr_tail = self._stderr_tail[-20:]
+        if self.process and self._stderr_tail:
+            return_code = await asyncio.to_thread(self.process.wait)
+            if return_code != 0:
+                self.last_error = self._stderr_tail[-1]
 
     async def _read_mjpeg_stdout(self) -> None:
         if not self.process or not self.process.stdout:
@@ -322,20 +335,27 @@ class CaptureProcess:
         self.settings.chunk_dir.mkdir(parents=True, exist_ok=True)
         self.settings.replay_dir.mkdir(parents=True, exist_ok=True)
 
-    def _build_command(self) -> list[str]:
-        input_args = self._input_args()
-        audio_map = self._audio_map()
+    def _build_command(
+        self,
+        *,
+        input_args: list[str] | None = None,
+        audio_map: str | None = None,
+    ) -> list[str]:
+        input_args = self._input_args() if input_args is None else input_args
+        audio_map = self._audio_map() if audio_map is None else audio_map
         keyframe_interval = max(self.settings.fps * self.settings.chunk_seconds, 1)
-        chunk_pattern = self.settings.chunk_dir / "chunk_%Y%m%d_%H%M%S.mp4"
+        if self.session_id is None:
+            self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid4().hex[:8]
+        # Numeric segment names are understood directly by the segment muxer.
+        # A unique session prefix prevents collisions with previous app runs.
+        chunk_pattern = self.settings.chunk_dir / f"chunk_{self.session_id}_%06d.mp4"
 
         return [
             require_ffmpeg_path(),
             "-hide_banner",
             "-loglevel",
             "warning",
-            # Drop frames that are already late instead of accumulating delay.
-            "-frame_drop_threshold",
-            "0",
+            "-nostdin",
             *input_args,
             "-map",
             "0:v:0",
@@ -348,8 +368,8 @@ class CaptureProcess:
             "image2pipe",
             "-vcodec",
             "mjpeg",
-            "-vsync",
-            "drop",
+            "-fps_mode",
+            "passthrough",
             "pipe:1",
             "-map",
             "0:v:0",
@@ -357,8 +377,8 @@ class CaptureProcess:
             audio_map,
             *self._recording_video_filter_args(),
             *self._encoder_args(),
-            "-r",
-            str(self.settings.fps),
+            "-fps_mode",
+            "cfr",
             "-g",
             str(keyframe_interval),
             "-sc_threshold",
@@ -369,13 +389,9 @@ class CaptureProcess:
             "128k",
             "-f",
             "segment",
-            "-vsync",
-            "drop",
             "-segment_time",
             str(self.settings.chunk_seconds),
             "-reset_timestamps",
-            "1",
-            "-strftime",
             "1",
             "-segment_format",
             "mp4",
@@ -651,7 +667,7 @@ async def save_replay(settings: Settings, seconds: int | None = None) -> ReplayS
         raise RuntimeError("No completed buffered chunks are available yet")
 
     settings.replay_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S_%f")
     output = settings.replay_dir / f"replay_{stamp}.mp4"
     concat_file = settings.data_dir / f"concat_{stamp}.txt"
 
