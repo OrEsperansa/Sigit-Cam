@@ -452,11 +452,14 @@ class CaptureProcess:
         return ",".join(filters)
 
     def _recording_video_filter_args(self) -> list[str]:
-        filters = ["setpts=PTS-STARTPTS"]
+        # Keep the source timestamps: audio and video are stamped from the same
+        # capture clock, so resetting each stream independently loses their
+        # measured relationship and requires a hand-tuned offset.
+        filters = []
         rotation = self._rotation_filter()
         if rotation:
             filters.append(rotation)
-        return ["-vf", ",".join(filters)]
+        return ["-vf", ",".join(filters)] if filters else []
 
     def _rotation_filter(self) -> str:
         degrees = self.settings.camera_rotation_degrees % 360
@@ -479,14 +482,10 @@ class CaptureProcess:
         return args
 
     def _recording_audio_filter(self) -> str:
-        filters = ["aresample=async=1000:first_pts=0"]
-        offset_ms = self.settings.audio_sync_offset_ms
-        if offset_ms < 0:
-            filters.append(f"atrim=start={abs(offset_ms) / 1000:.3f}")
-        elif offset_ms > 0:
-            filters.append(f"adelay={offset_ms}:all=1")
-        filters.append("asetpts=N/SR/TB")
-        return ",".join(filters)
+        # Preserve input PTS and continuously stretch, trim, or pad audio when
+        # its clock drifts. Do not force first_pts=0: that would erase the
+        # device-reported start relationship between audio and video.
+        return "aresample=async=1000"
     def _video_pixel_format(self) -> str:
         configured = self.settings.video_pixel_format
         if configured and configured != "auto":
@@ -698,7 +697,7 @@ def _replay_concat_command(settings: Settings, concat_file: Path, output: Path) 
         "-b:a",
         "128k",
         "-af",
-        "aresample=async=1:first_pts=0",
+        "aresample=async=1",
         "-avoid_negative_ts",
         "make_zero",
         "-movflags",

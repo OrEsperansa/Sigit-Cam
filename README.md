@@ -86,7 +86,6 @@ FPS=30
 VIDEO_CODEC=libx264
 VIDEO_PIXEL_FORMAT=auto
 AUDIO_CODEC=aac
-AUDIO_SYNC_OFFSET_MS=-120
 INPUT_MODE=dshow
 AUTO_DETECT_DEVICES=1
 VIDEO_DEVICE=
@@ -107,7 +106,7 @@ REPLAY_BACKUP_DIR=\\server\share\SigitCamReplays
 
 `CAMERA_ROTATION_DEGREES` rotates both the live browser view and newly recorded replay chunks. Use `90`, `180`, `270`, or any degree value; restart the app after changing it.
 
-`AUDIO_SYNC_OFFSET_MS` compensates for a fixed camera/microphone sync offset. Negative values advance late audio and positive values delay early audio; for example, `-120` advances audio by 120 ms.
+Audio/video synchronization is automatic. Capture timestamps are preserved from the camera and microphone, and FFmpeg continuously corrects audio clock drift; no millisecond offset needs to be calibrated.
 
 When `REPLAY_BACKUP_DIR` is set, each replay is first saved locally under `data/replays/` and then copied atomically to the configured backup directory. Failed share copies remain local and are retried every 30 seconds, including after an application restart. Backup health and pending copies are shown on the camera page. For Intel Quick Sync, set `VIDEO_CODEC=h264_qsv`; the default `VIDEO_PIXEL_FORMAT=auto` selects `nv12`, which is compatible with `h264_qsv`. The default `REPLAY_AUDIO_MODE=repair` copies video while rebuilding AAC audio timestamps during replay save; use `REPLAY_AUDIO_MODE=copy` to restore the old no-reencode behavior.
 Output folders are created automatically:
