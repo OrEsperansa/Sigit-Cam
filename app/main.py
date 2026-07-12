@@ -17,7 +17,23 @@ from .ffmpeg import CaptureProcess, ReplaySaveResult, cleanup_old_chunks, discov
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-APP_VERSION = "mjpeg-live-v4"
+
+class PollingAccessFilter(logging.Filter):
+    """Hide successful background polling while retaining errors and mutations."""
+
+    QUIET_PATHS = {"/api/status", "/api/replays"}
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if not isinstance(args, tuple) or len(args) < 5:
+            return True
+        method, raw_path, status_code = args[1], str(args[2]), args[4]
+        path = raw_path.split("?", 1)[0]
+        return not (method == "GET" and path in self.QUIET_PATHS and int(status_code) < 400)
+
+
+logging.getLogger("uvicorn.access").addFilter(PollingAccessFilter())
+APP_VERSION = "mjpeg-live-v5"
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 capture = CaptureProcess(settings)

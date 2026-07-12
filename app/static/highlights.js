@@ -121,4 +121,4 @@ async function refreshHighlights() {
 
 refreshButton.addEventListener("click", refreshHighlights);
 refreshHighlights();
-setInterval(refreshHighlights, 15000);
+setInterval(refreshHighlights, 30000);

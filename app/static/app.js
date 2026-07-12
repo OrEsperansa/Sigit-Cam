@@ -113,4 +113,4 @@ saveButton.addEventListener("click", async () => {
 });
 
 refreshStatus();
-setInterval(refreshStatus, 2000);
+setInterval(refreshStatus, 5000);
