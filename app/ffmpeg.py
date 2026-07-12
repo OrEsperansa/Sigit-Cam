@@ -333,6 +333,9 @@ class CaptureProcess:
             "-hide_banner",
             "-loglevel",
             "warning",
+            # Drop frames that are already late instead of accumulating delay.
+            "-frame_drop_threshold",
+            "0",
             *input_args,
             "-map",
             "0:v:0",
@@ -345,6 +348,8 @@ class CaptureProcess:
             "image2pipe",
             "-vcodec",
             "mjpeg",
+            "-vsync",
+            "drop",
             "pipe:1",
             "-map",
             "0:v:0",
@@ -364,6 +369,8 @@ class CaptureProcess:
             "128k",
             "-f",
             "segment",
+            "-vsync",
+            "drop",
             "-segment_time",
             str(self.settings.chunk_seconds),
             "-reset_timestamps",
@@ -396,6 +403,12 @@ class CaptureProcess:
         degrees = self.settings.camera_rotation_degrees % 360
         if abs(degrees) < 0.0001:
             return ""
+        if abs(degrees - 90) < 0.0001:
+            return "transpose=clock"
+        if abs(degrees - 180) < 0.0001:
+            return "hflip,vflip"
+        if abs(degrees - 270) < 0.0001:
+            return "transpose=cclock"
         return f"rotate={degrees}*PI/180:ow=ceil(rotw(iw)/2)*2:oh=ceil(roth(ih)/2)*2:fillcolor=black"
 
     def _encoder_args(self) -> list[str]:
@@ -434,6 +447,8 @@ class CaptureProcess:
                 source += f":audio={audio_device}"
             return [
                 *self._low_latency_input_args(),
+                "-use_wallclock_as_timestamps",
+                "1",
                 "-f",
                 "dshow",
                 "-rtbufsize",
