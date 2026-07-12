@@ -424,7 +424,7 @@ class CaptureProcess:
             "-sc_threshold",
             "0",
             "-af",
-            "aresample=async=1000:first_pts=0,asetpts=PTS-STARTPTS",
+            self._recording_audio_filter(),
             "-c:a",
             self.settings.audio_codec,
             "-b:a",
@@ -478,6 +478,15 @@ class CaptureProcess:
         args.extend(["-pix_fmt", self._video_pixel_format()])
         return args
 
+    def _recording_audio_filter(self) -> str:
+        filters = ["aresample=async=1000:first_pts=0"]
+        offset_ms = self.settings.audio_sync_offset_ms
+        if offset_ms < 0:
+            filters.append(f"atrim=start={abs(offset_ms) / 1000:.3f}")
+        elif offset_ms > 0:
+            filters.append(f"adelay={offset_ms}:all=1")
+        filters.append("asetpts=N/SR/TB")
+        return ",".join(filters)
     def _video_pixel_format(self) -> str:
         configured = self.settings.video_pixel_format
         if configured and configured != "auto":

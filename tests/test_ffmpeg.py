@@ -47,12 +47,30 @@ class CaptureCommandTests(unittest.TestCase):
         self.assertNotIn("-r", command)
         self.assertNotIn("-strftime", command)
         self.assertIn("setpts=PTS-STARTPTS", command)
-        self.assertIn("aresample=async=1000:first_pts=0,asetpts=PTS-STARTPTS", command)
+        self.assertIn("aresample=async=1000:first_pts=0,atrim=start=0.120,asetpts=N/SR/TB", command)
         self.assertIn("+nobuffer+discardcorrupt", CaptureProcess(settings)._low_latency_input_args())
         modes = [command[index + 1] for index, item in enumerate(command) if item == "-fps_mode"]
         self.assertEqual(modes, ["passthrough", "cfr"])
         self.assertTrue(command[-1].endswith("chunk_session_a_%06d.mp4"))
 
+    def test_audio_sync_offset_supports_advance_and_delay(self) -> None:
+        root = Path("test-data")
+        advanced = CaptureProcess(self.make_settings(root, audio_sync_offset_ms=-120))
+        delayed = CaptureProcess(self.make_settings(root, audio_sync_offset_ms=80))
+        neutral = CaptureProcess(self.make_settings(root, audio_sync_offset_ms=0))
+
+        self.assertEqual(
+            advanced._recording_audio_filter(),
+            "aresample=async=1000:first_pts=0,atrim=start=0.120,asetpts=N/SR/TB",
+        )
+        self.assertEqual(
+            delayed._recording_audio_filter(),
+            "aresample=async=1000:first_pts=0,adelay=80:all=1,asetpts=N/SR/TB",
+        )
+        self.assertEqual(
+            neutral._recording_audio_filter(),
+            "aresample=async=1000:first_pts=0,asetpts=N/SR/TB",
+        )
     def test_session_prefixes_prevent_chunk_name_collisions(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             root = Path(directory)
