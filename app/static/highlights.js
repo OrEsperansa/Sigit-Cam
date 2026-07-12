@@ -29,8 +29,13 @@ function formatModified(timestampSeconds) {
 }
 
 function setSelectedReplay(replay) {
+  const replayChanged = selectedFile !== replay.file;
   selectedFile = replay.file;
-  player.src = replay.url;
+  // Reassigning src aborts playback. Auto-refresh calls this every 15 seconds,
+  // so only load media when the user actually selects a different replay.
+  if (replayChanged || !player.getAttribute("src")) {
+    player.src = replay.url;
+  }
   player.classList.remove("hidden");
   emptyState.classList.add("hidden");
   title.textContent = replay.file;
@@ -48,6 +53,8 @@ function renderEmpty(messageText) {
   empty.textContent = messageText;
   highlightList.append(empty);
   player.removeAttribute("src");
+  player.load();
+  selectedFile = "";
   player.classList.add("hidden");
   emptyState.classList.remove("hidden");
   title.textContent = "Highlights";

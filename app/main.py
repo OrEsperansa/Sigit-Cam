@@ -228,4 +228,5 @@ async def download_replay(filename: str):
     path = settings.replay_dir / filename
     if not path.is_file() or path.parent != settings.replay_dir:
         raise HTTPException(status_code=404, detail="Replay not found")
-    return FileResponse(path, media_type="video/mp4", filename=filename)
+    # Serve inline; the highlights page uses a download attribute when needed.
+    return FileResponse(path, media_type="video/mp4")
