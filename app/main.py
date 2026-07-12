@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from .backup import BackupSynchronizer
 from .config import settings
 from .ffmpeg import CaptureProcess, ReplaySaveResult, cleanup_old_chunks, discover_ffmpeg_path, ffmpeg_discovery_error, list_dshow_devices, recent_chunks, save_replay
 
@@ -33,18 +34,29 @@ class PollingAccessFilter(logging.Filter):
 
 
 logging.getLogger("uvicorn.access").addFilter(PollingAccessFilter())
-APP_VERSION = "mjpeg-live-v6"
+APP_VERSION = "mjpeg-live-v7"
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 capture = CaptureProcess(settings)
 replay_lock = asyncio.Lock()
 replay_task: asyncio.Task[ReplaySaveResult] | None = None
+backup_sync = BackupSynchronizer(settings)
 
 
 async def cleanup_loop() -> None:
     while True:
         await cleanup_old_chunks(settings)
         await asyncio.sleep(max(settings.chunk_seconds, 1))
+
+
+async def backup_loop() -> None:
+    if settings.replay_backup_dir is None:
+        logging.info("Replay backup is disabled; set REPLAY_BACKUP_DIR to enable it")
+        return
+    logging.info("Replay backup synchronization enabled for %s", settings.replay_backup_dir)
+    while True:
+        await asyncio.to_thread(backup_sync.sync_once)
+        await asyncio.sleep(30)
 
 
 async def capture_loop() -> None:
@@ -65,11 +77,13 @@ async def lifespan(_: FastAPI):
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     cleanup_task = asyncio.create_task(cleanup_loop())
     capture_task = asyncio.create_task(capture_loop())
+    backup_task = asyncio.create_task(backup_loop())
     try:
         yield
     finally:
         cleanup_task.cancel()
         capture_task.cancel()
+        backup_task.cancel()
         capture.stop()
 
 
@@ -129,6 +143,7 @@ async def status():
         "stream_warning": stream_warning,
         "ffmpeg_path": discover_ffmpeg_path() or settings.ffmpeg_path,
         "ffmpeg_error": ffmpeg_discovery_error(),
+        "backup": backup_sync.status(),
     }
 
 

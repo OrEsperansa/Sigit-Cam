@@ -106,7 +106,7 @@ REPLAY_BACKUP_DIR=\\server\share\SigitCamReplays
 
 `CAMERA_ROTATION_DEGREES` rotates both the live browser view and newly recorded replay chunks. Use `90`, `180`, `270`, or any degree value; restart the app after changing it.
 
-When `REPLAY_BACKUP_DIR` is set, each replay is first saved locally under `data/replays/` and then copied to the configured backup directory. For Intel Quick Sync, set `VIDEO_CODEC=h264_qsv`; the default `VIDEO_PIXEL_FORMAT=auto` selects `nv12`, which is compatible with `h264_qsv`. The default `REPLAY_AUDIO_MODE=repair` copies video while rebuilding AAC audio timestamps during replay save; use `REPLAY_AUDIO_MODE=copy` to restore the old no-reencode behavior.
+When `REPLAY_BACKUP_DIR` is set, each replay is first saved locally under `data/replays/` and then copied atomically to the configured backup directory. Failed share copies remain local and are retried every 30 seconds, including after an application restart. Backup health and pending copies are shown on the camera page. For Intel Quick Sync, set `VIDEO_CODEC=h264_qsv`; the default `VIDEO_PIXEL_FORMAT=auto` selects `nv12`, which is compatible with `h264_qsv`. The default `REPLAY_AUDIO_MODE=repair` copies video while rebuilding AAC audio timestamps during replay save; use `REPLAY_AUDIO_MODE=copy` to restore the old no-reencode behavior.
 Output folders are created automatically:
 
 ```text

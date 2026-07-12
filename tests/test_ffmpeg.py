@@ -46,6 +46,8 @@ class CaptureCommandTests(unittest.TestCase):
         self.assertNotIn("-vsync", command)
         self.assertNotIn("-r", command)
         self.assertNotIn("-strftime", command)
+        self.assertIn("setpts=PTS-STARTPTS", command)
+        self.assertIn("aresample=async=1000:first_pts=0,asetpts=PTS-STARTPTS", command)
         self.assertIn("+nobuffer+discardcorrupt", CaptureProcess(settings)._low_latency_input_args())
         modes = [command[index + 1] for index, item in enumerate(command) if item == "-fps_mode"]
         self.assertEqual(modes, ["passthrough", "cfr"])
@@ -91,10 +93,13 @@ class MockedFFmpegIntegrationTests(unittest.TestCase):
             timeout=20,
             check=False,
         )
+        stderr = result.stderr.decode("utf-8", errors="replace")
+        self.assertNotIn("Non-monotonous DTS", stderr)
+        self.assertNotIn("Non-monotonic DTS", stderr)
         self.assertEqual(
             result.returncode,
             0,
-            result.stderr.decode("utf-8", errors="replace"),
+            stderr,
         )
         return sorted(settings.chunk_dir.glob(f"chunk_{session_id}_*.mp4"))
 

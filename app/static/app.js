@@ -4,6 +4,7 @@ const message = document.querySelector("#message");
 const captureDot = document.querySelector("#capture-dot");
 const captureLabel = document.querySelector("#capture-label");
 const buffered = document.querySelector("#buffered");
+const backupStatus = document.querySelector("#backup-status");
 const deviceInfo = document.querySelector("#device-info");
 const liveOverlay = document.querySelector("#live-overlay");
 
@@ -64,6 +65,20 @@ async function refreshStatus() {
   captureLabel.textContent = status.capture_running ? "Capture running" : "Capture stopped";
   buffered.textContent = `${status.buffered_seconds_estimate} sec`;
 
+  const backup = status.backup || {};
+  if (!backup.configured) {
+    backupStatus.textContent = "Disabled";
+    backupStatus.title = "Set REPLAY_BACKUP_DIR to enable share copies";
+  } else if (backup.last_error) {
+    backupStatus.textContent = backup.pending_count ? `Retrying (${backup.pending_count})` : "Share error";
+    backupStatus.title = backup.last_error;
+  } else if (backup.pending_count) {
+    backupStatus.textContent = `Pending (${backup.pending_count})`;
+    backupStatus.title = backup.path || "";
+  } else {
+    backupStatus.textContent = "Synchronized";
+    backupStatus.title = backup.path || "";
+  }
   const capture = status.capture || {};
   const videoDevice = capture.selected_video_device || "No camera selected";
   const audioDevice = capture.selected_audio_device || "No microphone selected";
@@ -104,7 +119,8 @@ saveButton.addEventListener("click", async () => {
     if (!response.ok) {
       throw new Error(data.detail || "Replay save failed");
     }
-    message.textContent = data.deduplicated ? `Already saving, linked ${data.file}` : `Saved ${data.file}`;
+    const localMessage = data.deduplicated ? `Already saving, linked ${data.file}` : `Saved ${data.file}`;
+    message.textContent = data.backup_error ? `${localMessage}. Share copy pending: ${data.backup_error}` : localMessage;
   } catch (error) {
     message.textContent = error.message;
   } finally {

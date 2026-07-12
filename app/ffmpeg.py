@@ -14,6 +14,7 @@ from pathlib import Path
 from time import monotonic
 from uuid import uuid4
 
+from .backup import copy_replay_atomic
 from .config import BASE_DIR, Settings
 
 
@@ -199,6 +200,9 @@ class CaptureProcess:
         self.live_clients = 0
         self.session_id: str | None = None
         self._stderr_tail: list[str] = []
+        self.corrupt_frame_count = 0
+        self._corrupt_since_summary = 0
+        self._last_corrupt_summary_at = monotonic()
 
     def start(self) -> None:
         if self.process and self.process.poll() is None:
@@ -210,6 +214,8 @@ class CaptureProcess:
         self.frame_count = 0
         self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid4().hex[:8]
         self._stderr_tail = []
+        self._corrupt_since_summary = 0
+        self._last_corrupt_summary_at = monotonic()
         try:
             command = self._build_command()
         except Exception as exc:
@@ -275,12 +281,41 @@ class CaptureProcess:
             "live_frame_count": self.frame_count,
             "live_frame_age_seconds": self.live_frame_age_seconds(),
             "live_clients": self.live_clients,
+            "corrupt_frame_count": self.corrupt_frame_count,
         }
 
     def live_frame_age_seconds(self) -> float | None:
         if self.latest_frame_at is None:
             return None
         return round(monotonic() - self.latest_frame_at, 2)
+
+    @staticmethod
+    def _is_corrupt_frame_message(message: str) -> bool:
+        lower = message.lower()
+        return any(pattern in lower for pattern in (
+            "bad vlc",
+            "dc error",
+            "eoi missing",
+            "found eoi before any sof",
+            "no jpeg data found",
+            "error submitting packet to decoder",
+            "invalid data found when processing input",
+            "overread",
+        ))
+
+    def _flush_corrupt_summary(self, force: bool = False) -> None:
+        if not self._corrupt_since_summary:
+            return
+        now = monotonic()
+        if not force and now - self._last_corrupt_summary_at < 60:
+            return
+        LOGGER.warning(
+            "Discarded %d corrupt camera JPEG frame(s) in the last interval (%d total)",
+            self._corrupt_since_summary,
+            self.corrupt_frame_count,
+        )
+        self._corrupt_since_summary = 0
+        self._last_corrupt_summary_at = now
 
     async def _log_stderr(self) -> None:
         if not self.process or not self.process.stderr:
@@ -290,14 +325,19 @@ class CaptureProcess:
             if not line:
                 break
             message = line.rstrip()
+            if self._is_corrupt_frame_message(message):
+                self.corrupt_frame_count += 1
+                self._corrupt_since_summary += 1
+                self._flush_corrupt_summary()
+                continue
             LOGGER.info(message)
             self._stderr_tail.append(message)
             self._stderr_tail = self._stderr_tail[-20:]
+        self._flush_corrupt_summary(force=True)
         if self.process and self._stderr_tail:
             return_code = await asyncio.to_thread(self.process.wait)
             if return_code != 0:
                 self.last_error = self._stderr_tail[-1]
-
     async def _read_mjpeg_stdout(self) -> None:
         if not self.process or not self.process.stdout:
             return
@@ -383,6 +423,8 @@ class CaptureProcess:
             str(keyframe_interval),
             "-sc_threshold",
             "0",
+            "-af",
+            "aresample=async=1000:first_pts=0,asetpts=PTS-STARTPTS",
             "-c:a",
             self.settings.audio_codec,
             "-b:a",
@@ -410,10 +452,11 @@ class CaptureProcess:
         return ",".join(filters)
 
     def _recording_video_filter_args(self) -> list[str]:
+        filters = ["setpts=PTS-STARTPTS"]
         rotation = self._rotation_filter()
-        if not rotation:
-            return []
-        return ["-vf", rotation]
+        if rotation:
+            filters.append(rotation)
+        return ["-vf", ",".join(filters)]
 
     def _rotation_filter(self) -> str:
         degrees = self.settings.camera_rotation_degrees % 360
@@ -600,17 +643,12 @@ async def wait_for_current_chunk_to_finish(settings: Settings) -> None:
 def _copy_replay_to_backup(settings: Settings, output: Path) -> tuple[Path | None, str | None]:
     if settings.replay_backup_dir is None:
         return None, None
-
     try:
-        settings.replay_backup_dir.mkdir(parents=True, exist_ok=True)
-        backup_path = settings.replay_backup_dir / output.name
-        shutil.copy2(output, backup_path)
-        return backup_path, None
+        return copy_replay_atomic(settings, output), None
     except OSError as exc:
         message = f"Failed to copy replay to backup dir {settings.replay_backup_dir}: {exc}"
         LOGGER.exception(message)
         return None, message
-
 
 def _replay_concat_command(settings: Settings, concat_file: Path, output: Path) -> list[str]:
     base = [
