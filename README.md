@@ -77,7 +77,7 @@ REPLAY_AUDIO_MODE=repair
 LIVE_FPS=5
 LIVE_WIDTH=640
 LIVE_JPEG_QUALITY=10
-DSHOW_RTBUFSIZE=2M
+DSHOW_RTBUFSIZE=8M
 LOW_LATENCY_CAPTURE=1
 RTSP_TRANSPORT=tcp
 CAMERA_ROTATION_DEGREES=0
@@ -122,4 +122,4 @@ data/replays/
 - Replay saving does not re-encode.
 - The capture process is started when the FastAPI app starts.
 - If FFmpeg cannot open the configured device, check the server logs and verify device names.
-- The live page requests one current JPEG at a time from `/live.jpg`, preventing a slow browser or network from accumulating old frames. The legacy MJPEG stream remains available at `/live.mjpg`.
+- Live MJPEG video is available at `/live.mjpg`; saved replays are MP4 files with audio.

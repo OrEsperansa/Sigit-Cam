@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -22,7 +22,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 class PollingAccessFilter(logging.Filter):
     """Hide successful background polling while retaining errors and mutations."""
 
-    QUIET_PATHS = {"/api/status", "/api/replays", "/live.jpg"}
+    QUIET_PATHS = {"/api/status", "/api/replays"}
 
     def filter(self, record: logging.LogRecord) -> bool:
         args = record.args
@@ -34,7 +34,7 @@ class PollingAccessFilter(logging.Filter):
 
 
 logging.getLogger("uvicorn.access").addFilter(PollingAccessFilter())
-APP_VERSION = "latest-frame-live-v9"
+APP_VERSION = "mjpeg-live-v8"
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 capture = CaptureProcess(settings)
@@ -131,8 +131,8 @@ async def status():
         "server_time": datetime.now(timezone.utc).isoformat(),
         "capture_running": capture_status["running"],
         "capture": capture_status,
-        "live_mode": "latest-frame",
-        "live_url": "/live.jpg",
+        "live_mode": "mjpeg",
+        "live_url": "/live.mjpg",
         "live_ready": live_ready,
         "replay_minutes": settings.replay_minutes,
         "max_buffer_minutes": settings.max_buffer_minutes,
@@ -207,40 +207,6 @@ async def live_mjpeg():
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
             "Expires": "0",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
-@app.get("/live.jpg")
-async def live_frame(after: int = -1):
-    """Return exactly one fresh frame so a slow client can never build a backlog."""
-    if not capture.is_running():
-        return Response(status_code=503, headers={"Cache-Control": "no-store"})
-
-    async with capture.frame_condition:
-        try:
-            await asyncio.wait_for(
-                capture.frame_condition.wait_for(
-                    lambda: capture.frame_count > after or not capture.is_running()
-                ),
-                timeout=10,
-            )
-        except asyncio.TimeoutError:
-            return Response(status_code=204, headers={"Cache-Control": "no-store"})
-
-        if capture.latest_frame is None:
-            return Response(status_code=503, headers={"Cache-Control": "no-store"})
-        frame = capture.latest_frame
-        frame_count = capture.frame_count
-
-    return Response(
-        content=frame,
-        media_type="image/jpeg",
-        headers={
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-            "Pragma": "no-cache",
-            "X-Frame-Count": str(frame_count),
             "X-Accel-Buffering": "no",
         },
     )
