@@ -57,7 +57,7 @@ class Settings:
     live_fps: int = _int_env("LIVE_FPS", 8)
     live_width: int = _int_env("LIVE_WIDTH", 960)
     live_jpeg_quality: int = _int_env("LIVE_JPEG_QUALITY", 8)
-    dshow_rtbufsize: str = os.getenv("DSHOW_RTBUFSIZE", "8M")
+    dshow_rtbufsize: str = os.getenv("DSHOW_RTBUFSIZE", "2M")
     low_latency_capture: bool = os.getenv("LOW_LATENCY_CAPTURE", "1").lower() not in {"0", "false", "no"}
     replay_finalize_wait_seconds: int = _int_env("REPLAY_FINALIZE_WAIT_SECONDS", 7)
     replay_audio_mode: str = os.getenv("REPLAY_AUDIO_MODE", "repair").lower()
