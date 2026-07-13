@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app.config import Settings
-from app.ffmpeg import CaptureProcess, _replay_concat_command, discover_ffmpeg_path, recent_chunks, save_replay
+from app.ffmpeg import CaptureProcess, discover_ffmpeg_path, recent_chunks, save_replay
 
 
 class CaptureCommandTests(unittest.TestCase):
@@ -46,26 +46,31 @@ class CaptureCommandTests(unittest.TestCase):
         self.assertNotIn("-vsync", command)
         self.assertNotIn("-r", command)
         self.assertNotIn("-strftime", command)
-        self.assertNotIn("setpts=PTS-STARTPTS", command)
-        self.assertIn("aresample=async=1000", command)
+        self.assertIn("setpts=PTS-STARTPTS", command)
+        self.assertIn("aresample=async=1000:first_pts=0,atrim=start=0.120,asetpts=N/SR/TB", command)
         self.assertIn("+nobuffer+discardcorrupt", CaptureProcess(settings)._low_latency_input_args())
         modes = [command[index + 1] for index, item in enumerate(command) if item == "-fps_mode"]
         self.assertEqual(modes, ["passthrough", "cfr"])
         self.assertTrue(command[-1].endswith("chunk_session_a_%06d.mp4"))
 
-    def test_audio_sync_uses_capture_timestamps_without_manual_offset(self) -> None:
-        capture = CaptureProcess(self.make_settings(Path("test-data")))
+    def test_audio_sync_offset_supports_advance_and_delay(self) -> None:
+        root = Path("test-data")
+        advanced = CaptureProcess(self.make_settings(root, audio_sync_offset_ms=-120))
+        delayed = CaptureProcess(self.make_settings(root, audio_sync_offset_ms=80))
+        neutral = CaptureProcess(self.make_settings(root, audio_sync_offset_ms=0))
 
-        self.assertEqual(capture._recording_audio_filter(), "aresample=async=1000")
-        self.assertFalse(hasattr(capture.settings, "audio_sync_offset_ms"))
-
-    def test_replay_repair_preserves_audio_start_timestamp(self) -> None:
-        settings = self.make_settings(Path("test-data"))
-        with patch("app.ffmpeg.require_ffmpeg_path", return_value="ffmpeg"):
-            command = _replay_concat_command(settings, Path("chunks.txt"), Path("replay.mp4"))
-
-        self.assertIn("aresample=async=1", command)
-        self.assertNotIn("aresample=async=1:first_pts=0", command)
+        self.assertEqual(
+            advanced._recording_audio_filter(),
+            "aresample=async=1000:first_pts=0,atrim=start=0.120,asetpts=N/SR/TB",
+        )
+        self.assertEqual(
+            delayed._recording_audio_filter(),
+            "aresample=async=1000:first_pts=0,adelay=80:all=1,asetpts=N/SR/TB",
+        )
+        self.assertEqual(
+            neutral._recording_audio_filter(),
+            "aresample=async=1000:first_pts=0,asetpts=N/SR/TB",
+        )
     def test_session_prefixes_prevent_chunk_name_collisions(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             root = Path(directory)

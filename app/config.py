@@ -53,6 +53,8 @@ class Settings:
     video_codec: str = os.getenv("VIDEO_CODEC", "libx264")
     video_pixel_format: str = os.getenv("VIDEO_PIXEL_FORMAT", "auto").lower()
     audio_codec: str = os.getenv("AUDIO_CODEC", "aac")
+    # Negative values advance late audio; positive values delay early audio.
+    audio_sync_offset_ms: int = _int_env("AUDIO_SYNC_OFFSET_MS", -120)
     ffmpeg_path: str = os.getenv("FFMPEG_PATH", "")
     live_fps: int = _int_env("LIVE_FPS", 8)
     live_width: int = _int_env("LIVE_WIDTH", 960)
