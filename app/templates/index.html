@@ -28,6 +28,18 @@
         </div>
         <p id="device-info" class="device-info">Detecting devices</p>
 
+        <section class="audio-meter" aria-labelledby="audio-meter-label">
+          <div class="audio-meter-heading">
+            <span id="audio-meter-label">Microphone level</span>
+            <span id="audio-meter-value">Waiting</span>
+          </div>
+          <div id="audio-meter-track" class="audio-meter-track" role="meter"
+            aria-label="Microphone input level" aria-valuemin="-60" aria-valuemax="0" aria-valuenow="-60">
+            <span id="audio-meter-fill" class="audio-meter-fill"></span>
+          </div>
+          <p id="audio-meter-status" class="audio-meter-status">Waiting for microphone samples</p>
+        </section>
+
         <dl class="stats">
           <div>
             <dt>Replay</dt>

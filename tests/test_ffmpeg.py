@@ -47,7 +47,11 @@ class CaptureCommandTests(unittest.TestCase):
         self.assertNotIn("-r", command)
         self.assertNotIn("-strftime", command)
         self.assertIn("setpts=PTS-STARTPTS", command)
-        self.assertIn("aresample=async=1000:first_pts=0,atrim=start=0.120,asetpts=N/SR/TB", command)
+        self.assertTrue(any(
+            item.startswith("aresample=async=1000:first_pts=0,atrim=start=0.120,asetpts=N/SR/TB,")
+            for item in command
+        ))
+        self.assertTrue(any("astats=metadata=1:reset=1" in item for item in command))
         self.assertIn("+nobuffer+discardcorrupt", CaptureProcess(settings)._low_latency_input_args())
         modes = [command[index + 1] for index, item in enumerate(command) if item == "-fps_mode"]
         self.assertEqual(modes, ["passthrough", "cfr"])
@@ -61,16 +65,26 @@ class CaptureCommandTests(unittest.TestCase):
 
         self.assertEqual(
             advanced._recording_audio_filter(),
-            "aresample=async=1000:first_pts=0,atrim=start=0.120,asetpts=N/SR/TB",
+            "aresample=async=1000:first_pts=0,atrim=start=0.120,asetpts=N/SR/TB,astats=metadata=1:reset=1,ametadata=mode=print:key=lavfi.astats.Overall.Peak_level:file='pipe\\:2'",
         )
         self.assertEqual(
             delayed._recording_audio_filter(),
-            "aresample=async=1000:first_pts=0,adelay=80:all=1,asetpts=N/SR/TB",
+            "aresample=async=1000:first_pts=0,adelay=80:all=1,asetpts=N/SR/TB,astats=metadata=1:reset=1,ametadata=mode=print:key=lavfi.astats.Overall.Peak_level:file='pipe\\:2'",
         )
         self.assertEqual(
             neutral._recording_audio_filter(),
-            "aresample=async=1000:first_pts=0,asetpts=N/SR/TB",
+            "aresample=async=1000:first_pts=0,asetpts=N/SR/TB,astats=metadata=1:reset=1,ametadata=mode=print:key=lavfi.astats.Overall.Peak_level:file='pipe\\:2'",
         )
+
+    def test_audio_meter_parses_samples_and_silence(self) -> None:
+        capture = CaptureProcess(self.make_settings(Path("test-data")))
+        self.assertTrue(capture._consume_audio_meter_line("frame:0 pts:0"))
+        self.assertTrue(capture._consume_audio_meter_line("lavfi.astats.Overall.Peak_level=-18.5"))
+        self.assertEqual(capture.audio_peak_db, -18.5)
+        self.assertIsNotNone(capture.audio_peak_at)
+        self.assertTrue(capture._consume_audio_meter_line("lavfi.astats.Overall.Peak_level=-inf"))
+        self.assertEqual(capture.audio_peak_db, -96.0)
+        self.assertFalse(capture._consume_audio_meter_line("ordinary ffmpeg warning"))
     def test_session_prefixes_prevent_chunk_name_collisions(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             root = Path(directory)

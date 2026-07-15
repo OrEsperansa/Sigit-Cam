@@ -34,7 +34,7 @@ class PollingAccessFilter(logging.Filter):
 
 
 logging.getLogger("uvicorn.access").addFilter(PollingAccessFilter())
-APP_VERSION = "mjpeg-live-v8"
+APP_VERSION = "audio-meter-v9"
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 capture = CaptureProcess(settings)
@@ -75,6 +75,14 @@ async def capture_loop() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings.data_dir.mkdir(parents=True, exist_ok=True)
+    # Chunks are an ephemeral rolling buffer. Never mix data from an earlier
+    # application/capture session into a newly saved replay.
+    settings.chunk_dir.mkdir(parents=True, exist_ok=True)
+    for old_chunk in settings.chunk_dir.glob("chunk_*.mp4"):
+        try:
+            old_chunk.unlink()
+        except FileNotFoundError:
+            pass
     cleanup_task = asyncio.create_task(cleanup_loop())
     capture_task = asyncio.create_task(capture_loop())
     backup_task = asyncio.create_task(backup_loop())
@@ -165,6 +173,17 @@ async def devices():
         "error": inventory.error,
         "ffmpeg_path": ffmpeg_path,
         "ffmpeg_error": ffmpeg_discovery_error(),
+    }
+
+
+@app.get("/api/audio-level")
+async def audio_level():
+    capture_status = capture.status()
+    return {
+        "peak_db": capture_status["audio_peak_db"],
+        "age_seconds": capture_status["audio_level_age_seconds"],
+        "active": capture_status["audio_active"],
+        "microphone": capture_status["selected_audio_device"],
     }
 
 

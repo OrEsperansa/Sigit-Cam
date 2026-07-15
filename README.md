@@ -77,7 +77,7 @@ REPLAY_AUDIO_MODE=repair
 LIVE_FPS=5
 LIVE_WIDTH=640
 LIVE_JPEG_QUALITY=10
-DSHOW_RTBUFSIZE=8M
+DSHOW_RTBUFSIZE=64M
 LOW_LATENCY_CAPTURE=1
 RTSP_TRANSPORT=tcp
 CAMERA_ROTATION_DEGREES=0
@@ -124,3 +124,5 @@ data/replays/
 - The capture process is started when the FastAPI app starts.
 - If FFmpeg cannot open the configured device, check the server logs and verify device names.
 - Live MJPEG video is available at `/live.mjpg`; saved replays are MP4 files with audio.
+- The microphone meter measures the same server-side audio stream written to replay chunks; it does not merely report browser device detection.
+- The rolling chunk buffer is cleared whenever the application starts. Saved replays are retained.

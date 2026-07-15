@@ -134,6 +134,53 @@ img.hidden {
   overflow-wrap: anywhere;
 }
 
+.audio-meter {
+  margin: 4px 0 18px;
+  padding: 12px;
+  border: 1px solid #2a3038;
+  border-radius: 6px;
+  background: #14181d;
+}
+
+.audio-meter-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: #d7dee7;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+#audio-meter-value { color: #aab3bf; font-variant-numeric: tabular-nums; }
+
+.audio-meter-track {
+  height: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #272d35;
+}
+
+.audio-meter-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: #8a949f;
+  transition: width 120ms linear, background-color 120ms linear;
+}
+
+.audio-meter-track.receiving .audio-meter-fill {
+  background: linear-gradient(90deg, #35c275 0%, #35c275 72%, #e1bb42 88%, #df5b52 100%);
+}
+
+.audio-meter-status {
+  min-height: 17px;
+  margin: 7px 0 0;
+  color: #aab3bf;
+  font-size: 12px;
+}
+
 .dot {
   width: 10px;
   height: 10px;

@@ -203,6 +203,8 @@ class CaptureProcess:
         self.corrupt_frame_count = 0
         self._corrupt_since_summary = 0
         self._last_corrupt_summary_at = monotonic()
+        self.audio_peak_db: float | None = None
+        self.audio_peak_at: float | None = None
 
     def start(self) -> None:
         if self.process and self.process.poll() is None:
@@ -216,6 +218,8 @@ class CaptureProcess:
         self._stderr_tail = []
         self._corrupt_since_summary = 0
         self._last_corrupt_summary_at = monotonic()
+        self.audio_peak_db = None
+        self.audio_peak_at = None
         try:
             command = self._build_command()
         except Exception as exc:
@@ -282,12 +286,38 @@ class CaptureProcess:
             "live_frame_age_seconds": self.live_frame_age_seconds(),
             "live_clients": self.live_clients,
             "corrupt_frame_count": self.corrupt_frame_count,
+            "audio_peak_db": self.audio_peak_db,
+            "audio_level_age_seconds": self.audio_level_age_seconds(),
+            "audio_active": self.audio_is_active(),
         }
 
     def live_frame_age_seconds(self) -> float | None:
         if self.latest_frame_at is None:
             return None
         return round(monotonic() - self.latest_frame_at, 2)
+
+    def audio_level_age_seconds(self) -> float | None:
+        if self.audio_peak_at is None:
+            return None
+        return round(monotonic() - self.audio_peak_at, 2)
+
+    def audio_is_active(self) -> bool:
+        age = self.audio_level_age_seconds()
+        return self.is_running() and age is not None and age < 2
+
+    def _consume_audio_meter_line(self, message: str) -> bool:
+        prefix = "lavfi.astats.Overall.Peak_level="
+        if message.startswith("frame:"):
+            return True
+        if not message.startswith(prefix):
+            return False
+        try:
+            peak = float(message.removeprefix(prefix))
+        except ValueError:
+            return True
+        self.audio_peak_db = max(-96.0, min(0.0, peak))
+        self.audio_peak_at = monotonic()
+        return True
 
     @staticmethod
     def _is_corrupt_frame_message(message: str) -> bool:
@@ -325,6 +355,8 @@ class CaptureProcess:
             if not line:
                 break
             message = line.rstrip()
+            if self._consume_audio_meter_line(message):
+                continue
             if self._is_corrupt_frame_message(message):
                 self.corrupt_frame_count += 1
                 self._corrupt_since_summary += 1
@@ -486,6 +518,11 @@ class CaptureProcess:
         elif offset_ms > 0:
             filters.append(f"adelay={offset_ms}:all=1")
         filters.append("asetpts=N/SR/TB")
+        # Measure the exact audio stream written into replay chunks.
+        filters.extend([
+            "astats=metadata=1:reset=1",
+            "ametadata=mode=print:key=lavfi.astats.Overall.Peak_level:file='pipe\\:2'",
+        ])
         return ",".join(filters)
     def _video_pixel_format(self) -> str:
         configured = self.settings.video_pixel_format
@@ -510,10 +547,7 @@ class CaptureProcess:
 
         if mode == "dshow":
             video_device, audio_device = self._resolve_dshow_devices()
-            source = f"video={video_device}"
-            if audio_device:
-                source += f":audio={audio_device}"
-            return [
+            args = [
                 *self._low_latency_input_args(),
                 "-use_wallclock_as_timestamps",
                 "1",
@@ -521,13 +555,26 @@ class CaptureProcess:
                 "dshow",
                 "-rtbufsize",
                 self.settings.dshow_rtbufsize,
+                "-thread_queue_size",
+                "1024",
                 "-video_size",
                 self.settings.video_resolution,
                 "-framerate",
                 str(self.settings.fps),
                 "-i",
-                source,
+                f"video={video_device}",
             ]
+            if audio_device:
+                # Isolate microphone buffering so camera pressure cannot starve
+                # audio and create silent sections in the recording.
+                args.extend([
+                    "-use_wallclock_as_timestamps", "1",
+                    "-f", "dshow",
+                    "-rtbufsize", self.settings.dshow_rtbufsize,
+                    "-thread_queue_size", "1024",
+                    "-i", f"audio={audio_device}",
+                ])
+            return args
 
         if mode == "v4l2":
             video = self.settings.video_device or "/dev/video0"
@@ -563,6 +610,9 @@ class CaptureProcess:
         ]
 
     def _audio_map(self) -> str:
+        if self.settings.input_mode == "dshow" and self.selected_audio_device:
+            # Restart capture instead of silently producing video-only chunks.
+            return "1:a:0"
         if self.settings.input_mode == "v4l2" and self.settings.audio_device:
             return "1:a:0?"
         return "0:a:0?"

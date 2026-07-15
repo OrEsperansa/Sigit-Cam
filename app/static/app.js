@@ -7,10 +7,45 @@ const buffered = document.querySelector("#buffered");
 const backupStatus = document.querySelector("#backup-status");
 const deviceInfo = document.querySelector("#device-info");
 const liveOverlay = document.querySelector("#live-overlay");
+const audioMeterTrack = document.querySelector("#audio-meter-track");
+const audioMeterFill = document.querySelector("#audio-meter-fill");
+const audioMeterValue = document.querySelector("#audio-meter-value");
+const audioMeterStatus = document.querySelector("#audio-meter-status");
 
 let playerStarted = false;
 let lastLiveFrameCount = 0;
 let unchangedStatusPolls = 0;
+let displayedAudioPercent = 0;
+
+async function refreshAudioLevel() {
+  try {
+    const response = await fetch(`/api/audio-level?ts=${Date.now()}`, { cache: "no-store" });
+    if (!response.ok) throw new Error(`audio level ${response.status}`);
+    const level = await response.json();
+    const hasSamples = level.active && Number.isFinite(level.peak_db);
+    const db = hasSamples ? Math.max(-60, Math.min(0, level.peak_db)) : -60;
+    const targetPercent = hasSamples ? ((db + 60) / 60) * 100 : 0;
+    displayedAudioPercent += (targetPercent - displayedAudioPercent) * 0.55;
+    if (targetPercent === 0 && displayedAudioPercent < 0.5) displayedAudioPercent = 0;
+
+    audioMeterFill.style.width = `${displayedAudioPercent.toFixed(1)}%`;
+    audioMeterTrack.setAttribute("aria-valuenow", db.toFixed(1));
+    audioMeterTrack.classList.toggle("receiving", hasSamples && level.peak_db > -55);
+    audioMeterValue.textContent = hasSamples ? `${level.peak_db.toFixed(1)} dB` : "No signal";
+    audioMeterStatus.textContent = !level.microphone
+      ? "No microphone selected"
+      : !hasSamples
+        ? "Microphone detected, but no samples are arriving"
+        : level.peak_db > -55
+          ? "Receiving audio"
+          : "Receiving silence — speak to test the microphone";
+  } catch (error) {
+    displayedAudioPercent = 0;
+    audioMeterFill.style.width = "0%";
+    audioMeterValue.textContent = "Unavailable";
+    audioMeterStatus.textContent = "Cannot read microphone level";
+  }
+}
 
 function showStreamStatus(text) {
   liveOverlay.textContent = text;
@@ -129,4 +164,6 @@ saveButton.addEventListener("click", async () => {
 });
 
 refreshStatus();
+refreshAudioLevel();
 setInterval(refreshStatus, 5000);
+setInterval(refreshAudioLevel, 250);
