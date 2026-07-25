@@ -5,12 +5,12 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
-from app.backup import BackupSynchronizer, copy_replay_atomic
+from app.backup import copy_replay_atomic
 from app.config import Settings
 from app.ffmpeg import CaptureProcess
 
 
-class BackupSynchronizerTests(unittest.TestCase):
+class ReplayBackupTests(unittest.TestCase):
     def make_settings(self, root: Path) -> Settings:
         replay_dir = root / "replays"
         replay_dir.mkdir()
@@ -37,25 +37,19 @@ class BackupSynchronizerTests(unittest.TestCase):
             self.assertEqual(destination.read_bytes(), source.read_bytes())
             self.assertEqual(list(settings.replay_backup_dir.glob("*.partial")), [])
 
-    def test_failed_share_is_reported_and_retried_after_recovery(self) -> None:
+    def test_copy_only_operates_on_the_requested_replay(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
             settings = self.make_settings(Path(directory))
-            source = settings.replay_dir / "replay_pending.mp4"
-            source.write_bytes(b"replay")
-            settings.replay_backup_dir.write_text("not a directory", encoding="utf-8")
-            synchronizer = BackupSynchronizer(settings)
+            requested = settings.replay_dir / "replay_requested.mp4"
+            unrelated = settings.replay_dir / "replay_unrelated.mp4"
+            requested.write_bytes(b"requested")
+            unrelated.write_bytes(b"unrelated")
 
-            failed = synchronizer.sync_once()
-            self.assertFalse(failed.healthy)
-            self.assertEqual(failed.pending_count, 1)
-            self.assertIsNotNone(failed.last_error)
+            result = copy_replay_atomic(settings, requested)
 
-            settings.replay_backup_dir.unlink()
-            recovered = synchronizer.sync_once()
-            self.assertTrue(recovered.healthy)
-            self.assertEqual(recovered.pending_count, 0)
-            self.assertIsNone(recovered.last_error)
-            self.assertEqual((settings.replay_backup_dir / source.name).read_bytes(), b"replay")
+            self.assertEqual(result, settings.replay_backup_dir / requested.name)
+            self.assertEqual(result.read_bytes(), b"requested")
+            self.assertFalse((settings.replay_backup_dir / unrelated.name).exists())
 
     def test_corrupt_jpeg_messages_are_classified(self) -> None:
         settings = replace(Settings(), replay_backup_dir=None)

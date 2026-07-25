@@ -32,10 +32,21 @@ def _path_env(name: str) -> Path | None:
     return Path(value)
 
 
+def _bool_env(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None or value == "":
+        return default
+    return value.lower() not in {"0", "false", "no"}
+
+
 @dataclass(frozen=True)
 class Settings:
     host: str = os.getenv("HOST", "0.0.0.0")
     port: int = _int_env("PORT", 8000)
+    app_password: str = os.getenv("APP_PASSWORD", "")
+    session_secret: str = os.getenv("SESSION_SECRET", "")
+    auth_cookie_secure: bool = _bool_env("AUTH_COOKIE_SECURE", False)
+    auth_session_hours: int = _int_env("AUTH_SESSION_HOURS", 12)
 
     input_mode: str = os.getenv("INPUT_MODE", "dshow").lower()
     auto_detect_devices: bool = os.getenv("AUTO_DETECT_DEVICES", "1").lower() not in {"0", "false", "no"}

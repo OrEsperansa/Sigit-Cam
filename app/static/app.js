@@ -33,17 +33,17 @@ async function refreshAudioLevel() {
     audioMeterTrack.classList.toggle("receiving", hasSamples && level.peak_db > -55);
     audioMeterValue.textContent = hasSamples ? `${level.peak_db.toFixed(1)} dB` : "No signal";
     audioMeterStatus.textContent = !level.microphone
-      ? "No microphone selected"
+      ? "No input selected"
       : !hasSamples
-        ? "Microphone detected, but no samples are arriving"
+        ? "Input detected, but no samples are arriving"
         : level.peak_db > -55
-          ? "Receiving audio"
-          : "Receiving silence — speak to test the microphone";
+          ? "Receiving input"
+          : "Receiving silence";
   } catch (error) {
     displayedAudioPercent = 0;
     audioMeterFill.style.width = "0%";
     audioMeterValue.textContent = "Unavailable";
-    audioMeterStatus.textContent = "Cannot read microphone level";
+    audioMeterStatus.textContent = "Cannot read input level";
   }
 }
 
@@ -90,33 +90,27 @@ async function refreshStatus() {
     status = await response.json();
   } catch (error) {
     captureDot.classList.remove("running");
-    captureLabel.textContent = "Server unreachable";
+    captureLabel.textContent = "Service unavailable";
     resetPlayer();
     showStreamStatus(`Cannot reach server: ${error.message}`);
     return;
   }
 
   captureDot.classList.toggle("running", status.capture_running);
-  captureLabel.textContent = status.capture_running ? "Capture running" : "Capture stopped";
+  captureLabel.textContent = status.capture_running ? "Live" : "Offline";
   buffered.textContent = `${status.buffered_seconds_estimate} sec`;
 
   const backup = status.backup || {};
   if (!backup.configured) {
     backupStatus.textContent = "Disabled";
-    backupStatus.title = "Set REPLAY_BACKUP_DIR to enable share copies";
-  } else if (backup.last_error) {
-    backupStatus.textContent = backup.pending_count ? `Retrying (${backup.pending_count})` : "Share error";
-    backupStatus.title = backup.last_error;
-  } else if (backup.pending_count) {
-    backupStatus.textContent = `Pending (${backup.pending_count})`;
-    backupStatus.title = backup.path || "";
+    backupStatus.title = "Secondary storage is not configured";
   } else {
-    backupStatus.textContent = "Synchronized";
+    backupStatus.textContent = "Copy on save";
     backupStatus.title = backup.path || "";
   }
   const capture = status.capture || {};
-  const videoDevice = capture.selected_video_device || "No camera selected";
-  const audioDevice = capture.selected_audio_device || "No microphone selected";
+  const videoDevice = capture.selected_video_device || "No video source";
+  const audioDevice = capture.selected_audio_device || "No audio source";
   const error = capture.last_error || capture.device_error || "";
   deviceInfo.textContent = error ? `${videoDevice} / ${audioDevice} - ${error}` : `${videoDevice} / ${audioDevice}`;
 
@@ -147,15 +141,15 @@ async function refreshStatus() {
 
 saveButton.addEventListener("click", async () => {
   saveButton.disabled = true;
-  message.textContent = "Saving replay...";
+  message.textContent = "Saving...";
   try {
     const response = await fetch("/api/replays", { method: "POST" });
     const data = await response.json();
     if (!response.ok) {
-      throw new Error(data.detail || "Replay save failed");
+      throw new Error(data.detail || "Save failed");
     }
-    const localMessage = data.deduplicated ? `Already saving, linked ${data.file}` : `Saved ${data.file}`;
-    message.textContent = data.backup_error ? `${localMessage}. Share copy pending: ${data.backup_error}` : localMessage;
+    const localMessage = data.deduplicated ? "A save is already in progress" : "Saved successfully";
+    message.textContent = data.backup_error ? `${localMessage}. Secondary copy failed.` : localMessage;
   } catch (error) {
     message.textContent = error.message;
   } finally {

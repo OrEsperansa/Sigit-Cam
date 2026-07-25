@@ -28,6 +28,10 @@ function formatModified(timestampSeconds) {
   return new Date(timestampSeconds * 1000).toLocaleString();
 }
 
+function displayName(replay) {
+  return `Saved item · ${formatModified(replay.modified)}`;
+}
+
 function setSelectedReplay(replay) {
   const replayChanged = selectedFile !== replay.file;
   selectedFile = replay.file;
@@ -38,7 +42,7 @@ function setSelectedReplay(replay) {
   }
   player.classList.remove("hidden");
   emptyState.classList.add("hidden");
-  title.textContent = replay.file;
+  title.textContent = displayName(replay);
   meta.textContent = `${formatModified(replay.modified)} - ${formatBytes(replay.bytes)}`;
 
   for (const item of highlightList.querySelectorAll(".highlight-item")) {
@@ -57,15 +61,15 @@ function renderEmpty(messageText) {
   selectedFile = "";
   player.classList.add("hidden");
   emptyState.classList.remove("hidden");
-  title.textContent = "Highlights";
-  meta.textContent = "Saved replays are loaded from this machine.";
+  title.textContent = "Library";
+  meta.textContent = "Saved items are loaded from this machine.";
 }
 
 function renderReplays(replays) {
   highlightList.innerHTML = "";
 
   if (replays.length === 0) {
-    renderEmpty("No replays saved yet.");
+    renderEmpty("No saved items yet.");
     return;
   }
 
@@ -81,7 +85,7 @@ function renderReplays(replays) {
 
     const name = document.createElement("span");
     name.className = "highlight-name";
-    name.textContent = replay.file;
+    name.textContent = displayName(replay);
 
     const info = document.createElement("span");
     info.className = "highlight-info";
@@ -113,7 +117,7 @@ async function refreshHighlights() {
     const replays = await response.json();
     renderReplays(replays);
   } catch (error) {
-    renderEmpty(`Could not load replays: ${error.message}`);
+    renderEmpty(`Could not load items: ${error.message}`);
   } finally {
     refreshButton.disabled = false;
   }

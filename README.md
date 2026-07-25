@@ -1,4 +1,4 @@
-# Instant Replay Camera System
+# Sigit Live
 
 Local PC-hosted instant replay system with:
 
@@ -69,6 +69,10 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 Environment variables:
 
 ```text
+APP_PASSWORD=replace-with-a-strong-password
+SESSION_SECRET=replace-with-at-least-32-random-characters
+AUTH_COOKIE_SECURE=0
+AUTH_SESSION_HOURS=12
 REPLAY_MINUTES=3
 MAX_BUFFER_MINUTES=5
 CHUNK_SECONDS=5
@@ -98,6 +102,11 @@ RTSP_URL=
 
 You can also copy `.env.example` to `.env`; the app loads `.env` automatically on startup.
 
+`APP_PASSWORD` is required. The application, API endpoints, live camera feed, and saved
+replays remain unavailable until a user signs in. `SESSION_SECRET` must contain at least
+32 characters and is used to sign the HTTP-only login cookie. Set `AUTH_COOKIE_SECURE=1`
+when serving the application over HTTPS. Changing either secret signs out existing browsers.
+
 
 Optional backup share:
 
@@ -109,7 +118,7 @@ REPLAY_BACKUP_DIR=\\server\share\SigitCamReplays
 
 `AUDIO_SYNC_OFFSET_MS` compensates for a fixed camera/microphone sync offset. Negative values advance late audio and positive values delay early audio; for example, `-120` advances audio by 120 ms.
 
-When `REPLAY_BACKUP_DIR` is set, each replay is first saved locally under `data/replays/` and then copied atomically to the configured backup directory. Failed share copies remain local and are retried every 30 seconds, including after an application restart. Backup health and pending copies are shown on the camera page. For Intel Quick Sync, set `VIDEO_CODEC=h264_qsv`; the default `VIDEO_PIXEL_FORMAT=auto` selects `nv12`, which is compatible with `h264_qsv`. The default `REPLAY_AUDIO_MODE=repair` copies video while rebuilding AAC audio timestamps during replay save; use `REPLAY_AUDIO_MODE=copy` to restore the old no-reencode behavior.
+When `REPLAY_BACKUP_DIR` is set, only the replay currently being saved is copied atomically to the configured backup directory. The application does not scan or synchronize either folder, and failed copies are not retried automatically. The local replay remains available and the save result reports a backup-copy error. For Intel Quick Sync, set `VIDEO_CODEC=h264_qsv`; the default `VIDEO_PIXEL_FORMAT=auto` selects `nv12`, which is compatible with `h264_qsv`. The default `REPLAY_AUDIO_MODE=repair` copies video while rebuilding AAC audio timestamps during replay save; use `REPLAY_AUDIO_MODE=copy` to restore the old no-reencode behavior.
 Output folders are created automatically:
 
 ```text

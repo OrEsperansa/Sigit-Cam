@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .backup import BackupSynchronizer
+from .auth import COOKIE_NAME, LoginAttemptLimiter, PasswordAuthMiddleware, is_authenticated, safe_next_path, session_token
 from .config import settings
 from .ffmpeg import CaptureProcess, ReplaySaveResult, cleanup_old_chunks, discover_ffmpeg_path, ffmpeg_discovery_error, list_dshow_devices, recent_chunks, save_replay
 
@@ -34,29 +35,19 @@ class PollingAccessFilter(logging.Filter):
 
 
 logging.getLogger("uvicorn.access").addFilter(PollingAccessFilter())
-APP_VERSION = "audio-meter-v9"
+APP_VERSION = "password-auth-v1"
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 capture = CaptureProcess(settings)
 replay_lock = asyncio.Lock()
 replay_task: asyncio.Task[ReplaySaveResult] | None = None
-backup_sync = BackupSynchronizer(settings)
+login_limiter = LoginAttemptLimiter()
 
 
 async def cleanup_loop() -> None:
     while True:
         await cleanup_old_chunks(settings)
         await asyncio.sleep(max(settings.chunk_seconds, 1))
-
-
-async def backup_loop() -> None:
-    if settings.replay_backup_dir is None:
-        logging.info("Replay backup is disabled; set REPLAY_BACKUP_DIR to enable it")
-        return
-    logging.info("Replay backup synchronization enabled for %s", settings.replay_backup_dir)
-    while True:
-        await asyncio.to_thread(backup_sync.sync_once)
-        await asyncio.sleep(30)
 
 
 async def capture_loop() -> None:
@@ -74,6 +65,10 @@ async def capture_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    if not settings.app_password:
+        raise RuntimeError("APP_PASSWORD must be set in .env")
+    if len(settings.session_secret) < 32:
+        raise RuntimeError("SESSION_SECRET must be at least 32 characters in .env")
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     # Chunks are an ephemeral rolling buffer. Never mix data from an earlier
     # application/capture session into a newly saved replay.
@@ -85,18 +80,69 @@ async def lifespan(_: FastAPI):
             pass
     cleanup_task = asyncio.create_task(cleanup_loop())
     capture_task = asyncio.create_task(capture_loop())
-    backup_task = asyncio.create_task(backup_loop())
     try:
         yield
     finally:
         cleanup_task.cancel()
         capture_task.cancel()
-        backup_task.cancel()
         capture.stop()
 
 
-app = FastAPI(title="Instant Replay Camera", lifespan=lifespan)
+app = FastAPI(title="Sigit Live", lifespan=lifespan)
+app.add_middleware(PasswordAuthMiddleware, settings=settings)
 app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static")
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request, next: str = "/"):
+    if is_authenticated(request, settings):
+        return RedirectResponse(safe_next_path(next), status_code=303)
+    return templates.TemplateResponse(
+        "login.html",
+        {"request": request, "error": None, "next": safe_next_path(next)},
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.post("/login", response_class=HTMLResponse)
+async def login(request: Request, password: str = Form(...), next: str = Form("/")):
+    client = request.client.host if request.client else "unknown"
+    target = safe_next_path(next)
+    if login_limiter.is_limited(client):
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "error": "Too many attempts. Try again in a few minutes.", "next": target},
+            status_code=429,
+            headers={"Cache-Control": "no-store"},
+        )
+    if not hmac.compare_digest(password, settings.app_password):
+        login_limiter.record_failure(client)
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "error": "Incorrect password.", "next": target},
+            status_code=401,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    login_limiter.clear(client)
+    response = RedirectResponse(target, status_code=303)
+    response.set_cookie(
+        COOKIE_NAME,
+        session_token(settings),
+        max_age=max(settings.auth_session_hours, 1) * 3600,
+        httponly=True,
+        secure=settings.auth_cookie_secure,
+        samesite="strict",
+        path="/",
+    )
+    return response
+
+
+@app.post("/logout")
+async def logout():
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie(COOKIE_NAME, path="/")
+    return response
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -151,7 +197,10 @@ async def status():
         "stream_warning": stream_warning,
         "ffmpeg_path": discover_ffmpeg_path() or settings.ffmpeg_path,
         "ffmpeg_error": ffmpeg_discovery_error(),
-        "backup": backup_sync.status(),
+        "backup": {
+            "configured": settings.replay_backup_dir is not None,
+            "path": str(settings.replay_backup_dir) if settings.replay_backup_dir else None,
+        },
     }
 
 

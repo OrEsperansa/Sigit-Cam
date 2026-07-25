@@ -3,67 +3,68 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Instant Replay Camera</title>
+    <title>Sigit Live</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
     <nav class="top-nav" aria-label="Primary navigation">
-      <a class="brand" href="/">Instant Replay</a>
+      <a class="brand" href="/">Sigit Live</a>
       <div class="nav-links">
-        <a class="nav-link active" href="/">Camera</a>
-        <a class="nav-link" href="/highlights">Highlights</a>
+        <a class="nav-link active" href="/">Live</a>
+        <a class="nav-link" href="/highlights">Library</a>
+        <form method="post" action="/logout"><button class="nav-link nav-button" type="submit">Sign out</button></form>
       </div>
     </nav>
 
     <main class="shell camera-shell">
       <section class="viewer">
-        <img id="live-image" class="hidden" alt="Live stream" />
-        <div id="live-overlay" class="live-overlay">Checking stream</div>
+        <img id="live-image" class="hidden" alt="Live view" />
+        <div id="live-overlay" class="live-overlay">Connecting</div>
       </section>
 
       <aside class="panel">
         <div class="status-row">
           <span id="capture-dot" class="dot"></span>
-          <span id="capture-label">Checking capture</span>
+          <span id="capture-label">Checking service</span>
         </div>
-        <p id="device-info" class="device-info">Detecting devices</p>
+        <p id="device-info" class="device-info">Detecting sources</p>
 
         <section class="audio-meter" aria-labelledby="audio-meter-label">
           <div class="audio-meter-heading">
-            <span id="audio-meter-label">Microphone level</span>
+            <span id="audio-meter-label">Input level</span>
             <span id="audio-meter-value">Waiting</span>
           </div>
           <div id="audio-meter-track" class="audio-meter-track" role="meter"
-            aria-label="Microphone input level" aria-valuemin="-60" aria-valuemax="0" aria-valuenow="-60">
+            aria-label="Input level" aria-valuemin="-60" aria-valuemax="0" aria-valuenow="-60">
             <span id="audio-meter-fill" class="audio-meter-fill"></span>
           </div>
-          <p id="audio-meter-status" class="audio-meter-status">Waiting for microphone samples</p>
+          <p id="audio-meter-status" class="audio-meter-status">Waiting for input</p>
         </section>
 
         <dl class="stats">
           <div>
-            <dt>Replay</dt>
+            <dt>Window</dt>
             <dd>{{ replay_minutes }} min</dd>
           </div>
           <div>
-            <dt>Chunk</dt>
+            <dt>Segment</dt>
             <dd>{{ chunk_seconds }} sec</dd>
           </div>
           <div>
-            <dt>Buffered</dt>
+            <dt>Available</dt>
             <dd id="buffered">0 sec</dd>
           </div>
           <div>
-            <dt>Rotation</dt>
+            <dt>Orientation</dt>
             <dd>{{ camera_rotation_degrees }} deg</dd>
           </div>
           <div>
-            <dt>Backup</dt>
+            <dt>Storage</dt>
             <dd id="backup-status">Checking</dd>
           </div>
         </dl>
 
-        <button id="save-button" type="button">Save Replay</button>
+        <button id="save-button" type="button">Save</button>
         <p id="message" class="message"></p>
       </aside>
     </main>

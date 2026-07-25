@@ -58,6 +58,86 @@ body {
   color: #f4f6f8;
 }
 
+.nav-links form {
+  margin: 0;
+}
+
+.nav-button {
+  min-height: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.login-page {
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #0d1014;
+}
+
+.login-card {
+  width: min(100%, 400px);
+  padding: 32px;
+  border: 1px solid #2a3038;
+  border-radius: 10px;
+  background: #181c21;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+}
+
+.login-eyebrow {
+  margin: 0 0 8px;
+  color: #8dbbff;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.login-intro {
+  margin: 8px 0 24px;
+  color: #aab3bf;
+}
+
+.login-form {
+  display: grid;
+  gap: 10px;
+}
+
+.login-form label {
+  color: #d7dee7;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.login-form input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid #36404c;
+  border-radius: 6px;
+  outline: none;
+  background: #101419;
+  color: #f4f6f8;
+  font: inherit;
+}
+
+.login-form input:focus {
+  border-color: #4b8de8;
+  box-shadow: 0 0 0 3px rgba(47, 125, 225, 0.18);
+}
+
+.login-form button {
+  margin-top: 6px;
+  background: #2f7de1;
+}
+
+.login-error {
+  margin: 0;
+  color: #ff918a;
+  font-size: 13px;
+}
+
 .shell {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;

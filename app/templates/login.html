@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sigit Live</title>
+    <link rel="stylesheet" href="/static/login.css" />
+  </head>
+  <body class="login-page">
+    <main class="login-card">
+      <p class="login-eyebrow">Sigit Live</p>
+      <h1>Welcome</h1>
+      <p class="login-intro">Enter your password to continue.</p>
+      <form class="login-form" method="post" action="/login">
+        <input type="hidden" name="next" value="{{ next }}" />
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" required autofocus autocomplete="current-password" />
+        {% if error %}<p class="login-error" role="alert">{{ error }}</p>{% endif %}
+        <button type="submit">Continue</button>
+      </form>
+    </main>
+  </body>
+</html>
