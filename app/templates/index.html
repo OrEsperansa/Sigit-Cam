@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Sigit Live</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v={{ app_version }}" />
   </head>
   <body>
     <nav class="top-nav" aria-label="Primary navigation">
@@ -31,12 +31,16 @@
 
         <section class="audio-meter" aria-labelledby="audio-meter-label">
           <div class="audio-meter-heading">
-            <span id="audio-meter-label">Input level</span>
+            <span id="audio-meter-label">Microphone volume</span>
             <span id="audio-meter-value">Waiting</span>
           </div>
           <div id="audio-meter-track" class="audio-meter-track" role="meter"
-            aria-label="Input level" aria-valuemin="-60" aria-valuemax="0" aria-valuenow="-60">
+            aria-label="Microphone volume" aria-valuemin="-60" aria-valuemax="0" aria-valuenow="-60"
+            aria-valuetext="Waiting for microphone input">
             <span id="audio-meter-fill" class="audio-meter-fill"></span>
+          </div>
+          <div class="audio-meter-scale" aria-hidden="true">
+            <span>Low</span><span>Good</span><span>Loud</span>
           </div>
           <p id="audio-meter-status" class="audio-meter-status">Waiting for input</p>
         </section>

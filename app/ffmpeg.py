@@ -33,6 +33,13 @@ class ReplaySaveResult:
     output: Path
     backup_path: Path | None = None
     backup_error: str | None = None
+    skipped_chunks: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ChunkValidation:
+    valid: bool
+    error: str | None = None
 
 
 @lru_cache(maxsize=1)
@@ -205,6 +212,9 @@ class CaptureProcess:
         self._last_corrupt_summary_at = monotonic()
         self.audio_peak_db: float | None = None
         self.audio_peak_at: float | None = None
+        self.invalid_chunk_count = 0
+        self.recording_warning: str | None = None
+        self._checked_chunks: set[Path] = set()
 
     def start(self) -> None:
         if self.process and self.process.poll() is None:
@@ -289,6 +299,8 @@ class CaptureProcess:
             "audio_peak_db": self.audio_peak_db,
             "audio_level_age_seconds": self.audio_level_age_seconds(),
             "audio_active": self.audio_is_active(),
+            "invalid_chunk_count": self.invalid_chunk_count,
+            "recording_warning": self.recording_warning,
         }
 
     def live_frame_age_seconds(self) -> float | None:
@@ -406,6 +418,27 @@ class CaptureProcess:
     def _ensure_dirs(self) -> None:
         self.settings.chunk_dir.mkdir(parents=True, exist_ok=True)
         self.settings.replay_dir.mkdir(parents=True, exist_ok=True)
+
+    async def check_finalized_chunks(self) -> bool:
+        """Validate newly closed segments. Return False when capture should restart."""
+        chunks = recent_chunks(self.settings, self.settings.max_buffer_seconds)
+        # A successor proves the previous segment was closed by the muxer.
+        healthy = True
+        for chunk in chunks[:-1]:
+            if chunk in self._checked_chunks:
+                continue
+            self._checked_chunks.add(chunk)
+            validation = await asyncio.to_thread(validate_chunk, self.settings, chunk)
+            if validation.valid:
+                continue
+            healthy = False
+            self.invalid_chunk_count += 1
+            self.recording_warning = (
+                f"Recording segment {chunk.name} was corrupt or had no audio; "
+                "capture was restarted"
+            )
+            LOGGER.error("%s: %s", self.recording_warning, validation.error or "validation failed")
+        return healthy
 
     def _build_command(
         self,
@@ -675,6 +708,63 @@ def recent_completed_chunks(settings: Settings, seconds: int) -> list[Path]:
     return chunks
 
 
+def validate_chunk(settings: Settings, chunk: Path) -> ChunkValidation:
+    """Decode a segment to verify that both video and audio are readable."""
+    command = [
+        require_ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-xerror",
+        "-i", str(chunk), "-map", "0:v:0", "-map", "0:a:0", "-f", "null", "-",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=max(settings.chunk_seconds * 3, 15),
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return ChunkValidation(False, str(exc))
+    if result.returncode == 0:
+        return ChunkValidation(True)
+    error = result.stderr.strip()
+    return ChunkValidation(False, error or f"FFmpeg exited with code {result.returncode}")
+
+
+async def validated_completed_chunks(
+    settings: Settings,
+    seconds: int,
+) -> tuple[list[Path], tuple[str, ...]]:
+    """Return only closed, decodable chunks, including a finalized newest chunk."""
+    chunks = recent_chunks(settings, seconds)
+    if not chunks:
+        return [], ()
+    # Keep save-time validation from launching one FFmpeg process per buffered
+    # segment at once on longer replay windows.
+    semaphore = asyncio.Semaphore(4)
+
+    async def validate_bounded(chunk: Path) -> ChunkValidation:
+        async with semaphore:
+            return await asyncio.to_thread(validate_chunk, settings, chunk)
+
+    validations = await asyncio.gather(*(validate_bounded(chunk) for chunk in chunks))
+    valid: list[Path] = []
+    skipped: list[str] = []
+    newest = chunks[-1]
+    for chunk, validation in zip(chunks, validations):
+        if validation.valid:
+            valid.append(chunk)
+        elif chunk != newest:
+            skipped.append(chunk.name)
+            LOGGER.error(
+                "Skipping corrupt or audio-less recording segment %s: %s",
+                chunk,
+                validation.error or "validation failed",
+            )
+        # A failing newest segment is normally the file currently being written.
+    return valid, tuple(skipped)
+
+
 async def wait_for_current_chunk_to_finish(settings: Settings) -> None:
     wait_seconds = max(settings.replay_finalize_wait_seconds, 0)
     if wait_seconds == 0:
@@ -694,8 +784,8 @@ async def wait_for_current_chunk_to_finish(settings: Settings) -> None:
         newest = current_chunks[-1]
         if newest != initial_newest:
             return
-        newest_age = datetime.now().timestamp() - newest.stat().st_mtime
-        if newest_age >= settings.chunk_seconds + 1:
+        validation = await asyncio.to_thread(validate_chunk, settings, newest)
+        if validation.valid:
             return
 
 
@@ -759,7 +849,7 @@ def _replay_concat_command(settings: Settings, concat_file: Path, output: Path) 
 async def save_replay(settings: Settings, seconds: int | None = None) -> ReplaySaveResult:
     duration = seconds or settings.replay_seconds
     await wait_for_current_chunk_to_finish(settings)
-    chunks = recent_completed_chunks(settings, duration)
+    chunks, skipped_chunks = await validated_completed_chunks(settings, duration)
     if not chunks:
         raise RuntimeError("No completed buffered chunks are available yet")
 
@@ -784,8 +874,14 @@ async def save_replay(settings: Settings, seconds: int | None = None) -> ReplayS
         )
         _, stderr = await process.communicate()
         if process.returncode != 0:
+            output.unlink(missing_ok=True)
             raise RuntimeError(stderr.decode("utf-8", errors="replace").strip())
         backup_path, backup_error = await asyncio.to_thread(_copy_replay_to_backup, settings, output)
-        return ReplaySaveResult(output=output, backup_path=backup_path, backup_error=backup_error)
+        return ReplaySaveResult(
+            output=output,
+            backup_path=backup_path,
+            backup_error=backup_error,
+            skipped_chunks=skipped_chunks,
+        )
     finally:
         concat_file.unlink(missing_ok=True)

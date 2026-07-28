@@ -30,8 +30,14 @@ async function refreshAudioLevel() {
 
     audioMeterFill.style.width = `${displayedAudioPercent.toFixed(1)}%`;
     audioMeterTrack.setAttribute("aria-valuenow", db.toFixed(1));
+    audioMeterTrack.setAttribute(
+      "aria-valuetext",
+      hasSamples ? `${targetPercent.toFixed(0)} percent, ${level.peak_db.toFixed(1)} decibels` : "No microphone signal",
+    );
     audioMeterTrack.classList.toggle("receiving", hasSamples && level.peak_db > -55);
-    audioMeterValue.textContent = hasSamples ? `${level.peak_db.toFixed(1)} dB` : "No signal";
+    audioMeterValue.textContent = hasSamples
+      ? `${targetPercent.toFixed(0)}% · ${level.peak_db.toFixed(1)} dB`
+      : "No signal";
     audioMeterStatus.textContent = !level.microphone
       ? "No input selected"
       : !hasSamples
@@ -42,6 +48,7 @@ async function refreshAudioLevel() {
   } catch (error) {
     displayedAudioPercent = 0;
     audioMeterFill.style.width = "0%";
+    audioMeterTrack.setAttribute("aria-valuetext", "Microphone level unavailable");
     audioMeterValue.textContent = "Unavailable";
     audioMeterStatus.textContent = "Cannot read input level";
   }
@@ -111,8 +118,12 @@ async function refreshStatus() {
   const capture = status.capture || {};
   const videoDevice = capture.selected_video_device || "No video source";
   const audioDevice = capture.selected_audio_device || "No audio source";
-  const error = capture.last_error || capture.device_error || "";
+  const error = capture.recording_warning || capture.last_error || capture.device_error || "";
   deviceInfo.textContent = error ? `${videoDevice} / ${audioDevice} - ${error}` : `${videoDevice} / ${audioDevice}`;
+  if (capture.recording_warning) {
+    captureLabel.textContent = "Recording warning";
+    captureDot.classList.remove("running");
+  }
 
   if (!status.live_ready) {
     resetPlayer();
@@ -149,7 +160,11 @@ saveButton.addEventListener("click", async () => {
       throw new Error(data.detail || "Save failed");
     }
     const localMessage = data.deduplicated ? "A save is already in progress" : "Saved successfully";
-    message.textContent = data.backup_error ? `${localMessage}. Secondary copy failed.` : localMessage;
+    const skippedMessage = data.skipped_chunks?.length
+      ? `. Warning: skipped ${data.skipped_chunks.length} corrupt or audio-less segment(s).`
+      : "";
+    const backupMessage = data.backup_error ? " Secondary copy failed." : "";
+    message.textContent = `${localMessage}${skippedMessage}${backupMessage}`;
   } catch (error) {
     message.textContent = error.message;
   } finally {

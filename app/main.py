@@ -35,7 +35,7 @@ class PollingAccessFilter(logging.Filter):
 
 
 logging.getLogger("uvicorn.access").addFilter(PollingAccessFilter())
-APP_VERSION = "password-auth-v1"
+APP_VERSION = "microphone-meter-v1"
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 capture = CaptureProcess(settings)
@@ -59,6 +59,8 @@ async def capture_loop() -> None:
                 logging.exception("Failed to start capture")
         elif capture.live_frame_age_seconds() is not None and capture.live_frame_age_seconds() > 15:
             logging.warning("Live frames stalled for %s seconds; restarting capture", capture.live_frame_age_seconds())
+            capture.stop()
+        elif not await capture.check_finalized_chunks():
             capture.stop()
         await asyncio.sleep(5)
 
@@ -180,6 +182,8 @@ async def status():
         stream_warning = capture_status["last_error"] or "Camera capture is not running"
     elif not live_ready:
         stream_warning = "Camera capture is running, waiting for fresh live frames"
+    elif capture_status["recording_warning"]:
+        stream_warning = capture_status["recording_warning"]
     return {
         "app_version": APP_VERSION,
         "server_time": datetime.now(timezone.utc).isoformat(),
@@ -301,6 +305,7 @@ async def create_replay():
         "deduplicated": deduplicated,
         "backup_file": str(result.backup_path) if result.backup_path else None,
         "backup_error": result.backup_error,
+        "skipped_chunks": list(result.skipped_chunks),
     }
 
 

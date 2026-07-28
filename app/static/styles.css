@@ -235,10 +235,11 @@ img.hidden {
 #audio-meter-value { color: #aab3bf; font-variant-numeric: tabular-nums; }
 
 .audio-meter-track {
-  height: 12px;
+  height: 18px;
   overflow: hidden;
   border-radius: 999px;
   background: #272d35;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 5%);
 }
 
 .audio-meter-fill {
@@ -252,6 +253,16 @@ img.hidden {
 
 .audio-meter-track.receiving .audio-meter-fill {
   background: linear-gradient(90deg, #35c275 0%, #35c275 72%, #e1bb42 88%, #df5b52 100%);
+}
+
+.audio-meter-scale {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 5px;
+  color: #77818d;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .audio-meter-status {

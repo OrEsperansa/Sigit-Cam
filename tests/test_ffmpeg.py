@@ -4,13 +4,21 @@ import asyncio
 import os
 import subprocess
 import tempfile
+import time
 import unittest
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
 from app.config import Settings
-from app.ffmpeg import CaptureProcess, discover_ffmpeg_path, recent_chunks, save_replay
+from app.ffmpeg import (
+    CaptureProcess,
+    ChunkValidation,
+    discover_ffmpeg_path,
+    recent_chunks,
+    save_replay,
+    validated_completed_chunks,
+)
 
 
 class CaptureCommandTests(unittest.TestCase):
@@ -99,6 +107,62 @@ class CaptureCommandTests(unittest.TestCase):
 
             found = recent_chunks(settings, seconds=10**10)
             self.assertEqual(found, [first, second])
+
+    def test_validation_includes_finalized_newest_and_skips_bad_closed_chunk(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            root = Path(directory)
+            settings = self.make_settings(root)
+            settings.chunk_dir.mkdir()
+            bad = settings.chunk_dir / "chunk_session_000000.mp4"
+            newest = settings.chunk_dir / "chunk_session_000001.mp4"
+            bad.write_bytes(b"bad")
+            newest.write_bytes(b"good")
+            os.utime(bad, (1000, 1000))
+            os.utime(newest, (1001, 1001))
+
+            def validation(_: Settings, path: Path) -> ChunkValidation:
+                return ChunkValidation(path == newest, None if path == newest else "bad audio")
+
+            with patch("app.ffmpeg.validate_chunk", side_effect=validation):
+                chunks, skipped = asyncio.run(validated_completed_chunks(settings, 10**10))
+
+            self.assertEqual(chunks, [newest])
+            self.assertEqual(skipped, (bad.name,))
+
+    def test_active_only_chunk_is_not_saved_when_probe_fails(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            root = Path(directory)
+            settings = self.make_settings(root)
+            settings.chunk_dir.mkdir()
+            active = settings.chunk_dir / "chunk_session_000000.mp4"
+            active.write_bytes(b"still being written")
+
+            with patch("app.ffmpeg.validate_chunk", return_value=ChunkValidation(False, "no moov")):
+                chunks, skipped = asyncio.run(validated_completed_chunks(settings, 60))
+
+            self.assertEqual(chunks, [])
+            self.assertEqual(skipped, ())
+
+    def test_bad_finalized_chunk_sets_warning_and_requests_restart(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            root = Path(directory)
+            settings = self.make_settings(root)
+            settings.chunk_dir.mkdir()
+            closed = settings.chunk_dir / "chunk_session_000000.mp4"
+            active = settings.chunk_dir / "chunk_session_000001.mp4"
+            closed.write_bytes(b"bad")
+            active.write_bytes(b"active")
+            now = time.time()
+            os.utime(closed, (now - 1, now - 1))
+            os.utime(active, (now, now))
+            capture = CaptureProcess(settings)
+
+            with patch("app.ffmpeg.validate_chunk", return_value=ChunkValidation(False, "bad audio")):
+                healthy = asyncio.run(capture.check_finalized_chunks())
+
+            self.assertFalse(healthy)
+            self.assertEqual(capture.invalid_chunk_count, 1)
+            self.assertIn(closed.name, capture.recording_warning or "")
 
 
 class MockedFFmpegIntegrationTests(unittest.TestCase):
