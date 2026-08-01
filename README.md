@@ -1,25 +1,36 @@
 # Sigit Live
 
-Local PC-hosted instant replay system with:
-
-- Browser live viewer
-- Continuous rolling chunk recorder
-- One-click replay saving without stopping capture
-- Replay list and downloads
-
-The current implementation uses FastAPI and bundled FFmpeg. The live viewer uses browser-native MJPEG for low-latency LAN viewing with no CDN, plugin, or extra media server. The replay path is independent of the live viewer: saving a replay only concatenates already-recorded chunks with `-c copy`.
+Sigit Live is a Windows 10 instant-replay camera service. One FFmpeg 6 process opens the camera and microphone together through DirectShow, publishes a browser MJPEG view, and maintains a rolling H.264/AAC buffer. Pressing **Save** snapshots the current tail immediately and publishes a validated MP4 without stopping capture.
 
 ## Requirements
 
+- Windows 10
 - Python 3.11+
-- FFmpeg binary in `ffmpeg/` or FFmpeg available on `PATH`
-- A camera/audio source supported by FFmpeg
+- FFmpeg 6 in `ffmpeg/ffmpeg.exe` or on `PATH`
+- A DirectShow camera and microphone
 
-Install Python dependencies:
+Install dependencies and copy the configuration template:
 
 ```powershell
 python -m pip install -r requirements.txt
+Copy-Item .env.example .env
 ```
+
+List the exact device names:
+
+```powershell
+.\ffmpeg\ffmpeg.exe -list_devices true -f dshow -i dummy
+```
+
+Set both names in `.env`; automatic selection is intentionally unsupported because Windows device order is unstable.
+
+```text
+VIDEO_DEVICE=Creative Live! Cam Sync 1080p V2
+AUDIO_DEVICE=Microphone (Example Device)
+REPLAY_MINUTES=3
+```
+
+Also set `APP_PASSWORD` and a random `SESSION_SECRET` containing at least 32 characters.
 
 ## Run
 
@@ -27,111 +38,31 @@ python -m pip install -r requirements.txt
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-Open the control page:
+Open `http://127.0.0.1:8000` locally or use the PC's LAN address.
+
+## Capture and Recovery
+
+The recorder uses fixed `libx264`, AAC, closed GOPs, and flushed two-second MPEG-TS segments. Saved replays copy finalized segments and packet-align a byte snapshot of the active segment, so the click-time tail does not wait for segment finalization. Audio is rebuilt into the final MP4, then FFmpeg verifies positive video frames and decoded audio samples before the file is atomically published.
+
+The watchdog tracks video frames, audio frames, segment progress, and the FFmpeg process independently. Digital silence is healthy because samples still arrive. Missing audio for more than `AUDIO_STALL_SECONDS` triggers a complete generation reset. Every startup and reset stops the process and its readers, removes all rolling chunks and abandoned snapshots, and starts with a new generation. Saved files under `data/replays/` are never removed by a reset.
+
+## Replay Storage
+
+Runtime files are created under:
 
 ```text
-http://PC-IP:8000
+data/chunks/   ephemeral rolling MPEG-TS segments
+data/work/     temporary immutable replay snapshots
+data/replays/  validated MP4 replays
 ```
 
-Local machine:
+`REPLAY_BACKUP_DIR` optionally copies only the replay just saved. It does not scan or synchronize folders. The copy runs only after local validation and uses an atomic replacement; a backup failure does not remove the local replay.
 
-```text
-http://127.0.0.1:8000
-```
-
-## Windows USB Camera Example
-
-List DirectShow devices:
+## Verification
 
 ```powershell
-ffmpeg -list_devices true -f dshow -i dummy
+python -m unittest discover -s tests -v
+python -m compileall -q app tests
 ```
 
-Run with device names:
-
-```powershell
-$env:INPUT_MODE="dshow"
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-
-By default the app auto-selects the first detected camera and microphone. Set `VIDEO_DEVICE` and `AUDIO_DEVICE` only when you want to force specific devices.
-
-## RTSP / IP Camera Example
-
-```powershell
-$env:INPUT_MODE="rtsp"
-$env:RTSP_URL="rtsp://user:pass@camera-ip:554/stream1"
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-
-## Main Config
-
-Environment variables:
-
-```text
-APP_PASSWORD=replace-with-a-strong-password
-SESSION_SECRET=replace-with-at-least-32-random-characters
-AUTH_COOKIE_SECURE=0
-AUTH_SESSION_HOURS=12
-REPLAY_MINUTES=3
-MAX_BUFFER_MINUTES=5
-CHUNK_SECONDS=5
-REPLAY_FINALIZE_WAIT_SECONDS=7
-REPLAY_AUDIO_MODE=repair
-LIVE_FPS=5
-LIVE_WIDTH=640
-LIVE_JPEG_QUALITY=10
-DSHOW_RTBUFSIZE=64M
-LOW_LATENCY_CAPTURE=1
-RTSP_TRANSPORT=tcp
-CAMERA_ROTATION_DEGREES=0
-VIDEO_RESOLUTION=1280x720
-FPS=30
-VIDEO_CODEC=libx264
-VIDEO_PIXEL_FORMAT=auto
-AUDIO_CODEC=aac
-AUDIO_SYNC_OFFSET_MS=-120
-INPUT_MODE=dshow
-AUTO_DETECT_DEVICES=1
-VIDEO_DEVICE=
-AUDIO_DEVICE=
-RTSP_URL=
-# Optional override. By default the app uses ./ffmpeg/ffmpeg.exe.
-# FFMPEG_PATH=C:\path\to\ffmpeg.exe
-```
-
-You can also copy `.env.example` to `.env`; the app loads `.env` automatically on startup.
-
-`APP_PASSWORD` is required. The application, API endpoints, live camera feed, and saved
-replays remain unavailable until a user signs in. `SESSION_SECRET` must contain at least
-32 characters and is used to sign the HTTP-only login cookie. Set `AUTH_COOKIE_SECURE=1`
-when serving the application over HTTPS. Changing either secret signs out existing browsers.
-
-
-Optional backup share:
-
-```text
-REPLAY_BACKUP_DIR=\\server\share\SigitCamReplays
-```
-
-`CAMERA_ROTATION_DEGREES` rotates both the live browser view and newly recorded replay chunks. Use `90`, `180`, `270`, or any degree value; restart the app after changing it.
-
-`AUDIO_SYNC_OFFSET_MS` compensates for a fixed camera/microphone sync offset. Negative values advance late audio and positive values delay early audio; for example, `-120` advances audio by 120 ms.
-
-When `REPLAY_BACKUP_DIR` is set, only the replay currently being saved is copied atomically to the configured backup directory. The application does not scan or synchronize either folder, and failed copies are not retried automatically. The local replay remains available and the save result reports a backup-copy error. For Intel Quick Sync, set `VIDEO_CODEC=h264_qsv`; the default `VIDEO_PIXEL_FORMAT=auto` selects `nv12`, which is compatible with `h264_qsv`. The default `REPLAY_AUDIO_MODE=repair` copies video while rebuilding AAC audio timestamps during replay save; use `REPLAY_AUDIO_MODE=copy` to restore the old no-reencode behavior.
-Output folders are created automatically:
-
-```text
-data/chunks/
-data/replays/
-```
-
-## Notes
-
-- Replay saving does not restart the camera.
-- Replay saving does not re-encode.
-- The capture process is started when the FastAPI app starts.
-- If FFmpeg cannot open the configured device, check the server logs and verify device names.
-- Live MJPEG video is available at `/live.mjpg`; saved replays are MP4 files with audio.
-- The microphone meter measures the same server-side audio stream written to replay chunks; it does not merely report browser device detection.
-- The rolling chunk buffer is cleared whenever the application starts. Saved replays are retained.
+The container image can still be built for static checks, but DirectShow camera capture is Windows-host only and is not available inside the Linux container.

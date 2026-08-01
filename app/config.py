@@ -49,36 +49,32 @@ class Settings:
     auth_session_hours: int = _int_env("AUTH_SESSION_HOURS", 12)
 
     input_mode: str = os.getenv("INPUT_MODE", "dshow").lower()
-    auto_detect_devices: bool = os.getenv("AUTO_DETECT_DEVICES", "1").lower() not in {"0", "false", "no"}
     video_device: str = os.getenv("VIDEO_DEVICE", "")
     audio_device: str = os.getenv("AUDIO_DEVICE", "")
-    rtsp_url: str = os.getenv("RTSP_URL", "")
-    rtsp_transport: str = os.getenv("RTSP_TRANSPORT", "tcp").lower()
 
     replay_minutes: int = _int_env("REPLAY_MINUTES", 3)
     max_buffer_minutes: int = _int_env("MAX_BUFFER_MINUTES", 5)
-    chunk_seconds: int = _int_env("CHUNK_SECONDS", 5)
+    chunk_seconds: int = _int_env("CHUNK_SECONDS", 2)
     video_resolution: str = os.getenv("VIDEO_RESOLUTION", "1280x720")
     camera_rotation_degrees: float = _float_env("CAMERA_ROTATION_DEGREES", 0.0)
     fps: int = _int_env("FPS", 30)
-    video_codec: str = os.getenv("VIDEO_CODEC", "libx264")
-    video_pixel_format: str = os.getenv("VIDEO_PIXEL_FORMAT", "auto").lower()
-    audio_codec: str = os.getenv("AUDIO_CODEC", "aac")
     # Negative values advance late audio; positive values delay early audio.
-    audio_sync_offset_ms: int = _int_env("AUDIO_SYNC_OFFSET_MS", -120)
+    audio_sync_offset_ms: int = _int_env("AUDIO_SYNC_OFFSET_MS", 0)
     ffmpeg_path: str = os.getenv("FFMPEG_PATH", "")
     live_fps: int = _int_env("LIVE_FPS", 8)
     live_width: int = _int_env("LIVE_WIDTH", 960)
     live_jpeg_quality: int = _int_env("LIVE_JPEG_QUALITY", 8)
-    dshow_rtbufsize: str = os.getenv("DSHOW_RTBUFSIZE", "8M")
-    low_latency_capture: bool = os.getenv("LOW_LATENCY_CAPTURE", "1").lower() not in {"0", "false", "no"}
-    replay_finalize_wait_seconds: int = _int_env("REPLAY_FINALIZE_WAIT_SECONDS", 7)
-    replay_audio_mode: str = os.getenv("REPLAY_AUDIO_MODE", "repair").lower()
+    dshow_rtbufsize: str = os.getenv("DSHOW_RTBUFSIZE", "256M")
+    audio_startup_grace_seconds: float = _float_env("AUDIO_STARTUP_GRACE_SECONDS", 10.0)
+    audio_stall_seconds: float = _float_env("AUDIO_STALL_SECONDS", 3.0)
+    video_stall_seconds: float = _float_env("VIDEO_STALL_SECONDS", 10.0)
+    restart_max_backoff_seconds: float = _float_env("RESTART_MAX_BACKOFF_SECONDS", 30.0)
     replay_backup_dir: Path | None = _path_env("REPLAY_BACKUP_DIR")
 
     data_dir: Path = BASE_DIR / "data"
     chunk_dir: Path = BASE_DIR / "data" / "chunks"
     replay_dir: Path = BASE_DIR / "data" / "replays"
+    work_dir: Path = BASE_DIR / "data" / "work"
 
     @property
     def replay_seconds(self) -> int:
@@ -87,6 +83,24 @@ class Settings:
     @property
     def max_buffer_seconds(self) -> int:
         return self.max_buffer_minutes * 60
+
+    def validate_capture(self) -> None:
+        if self.input_mode != "dshow":
+            raise RuntimeError("INPUT_MODE must be dshow on the Windows capture host")
+        if not self.video_device.strip() or not self.audio_device.strip():
+            raise RuntimeError("VIDEO_DEVICE and AUDIO_DEVICE must be exact DirectShow device names")
+        if self.replay_minutes <= 0:
+            raise RuntimeError("REPLAY_MINUTES must be positive")
+        if self.max_buffer_minutes < self.replay_minutes:
+            raise RuntimeError("MAX_BUFFER_MINUTES must be at least REPLAY_MINUTES")
+        if self.chunk_seconds <= 0:
+            raise RuntimeError("CHUNK_SECONDS must be positive")
+        if self.fps <= 0 or self.live_fps <= 0 or self.live_width <= 0:
+            raise RuntimeError("FPS, LIVE_FPS, and LIVE_WIDTH must be positive")
+        if self.audio_startup_grace_seconds <= 0 or self.audio_stall_seconds <= 0:
+            raise RuntimeError("Audio watchdog intervals must be positive")
+        if self.video_stall_seconds <= 0 or self.restart_max_backoff_seconds <= 0:
+            raise RuntimeError("Video watchdog and restart backoff intervals must be positive")
 
 
 settings = Settings()

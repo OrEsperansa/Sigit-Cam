@@ -14,7 +14,7 @@ from .config import Settings
 
 
 COOKIE_NAME = "sigit_cam_session"
-PUBLIC_PATHS = {"/login", "/static/login.css"}
+PUBLIC_PATHS = {"/login", "/favicon.ico", "/static/login.css"}
 
 
 def session_token(settings: Settings) -> str:

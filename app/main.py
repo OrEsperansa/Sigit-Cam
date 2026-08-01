@@ -8,13 +8,20 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .auth import COOKIE_NAME, LoginAttemptLimiter, PasswordAuthMiddleware, is_authenticated, safe_next_path, session_token
 from .config import settings
-from .ffmpeg import CaptureProcess, ReplaySaveResult, cleanup_old_chunks, discover_ffmpeg_path, ffmpeg_discovery_error, list_dshow_devices, recent_chunks, save_replay
+from .ffmpeg import (
+    CaptureProcess,
+    ReplaySaveResult,
+    discover_ffmpeg_path,
+    ffmpeg_discovery_error,
+    list_dshow_devices,
+    save_replay,
+)
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -23,7 +30,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 class PollingAccessFilter(logging.Filter):
     """Hide successful background polling while retaining errors and mutations."""
 
-    QUIET_PATHS = {"/api/status", "/api/replays"}
+    QUIET_PATHS = {"/api/status", "/api/replays", "/api/audio-level"}
 
     def filter(self, record: logging.LogRecord) -> bool:
         args = record.args
@@ -35,7 +42,7 @@ class PollingAccessFilter(logging.Filter):
 
 
 logging.getLogger("uvicorn.access").addFilter(PollingAccessFilter())
-APP_VERSION = "microphone-meter-v1"
+APP_VERSION = "capture-generation-v3"
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 capture = CaptureProcess(settings)
@@ -44,25 +51,37 @@ replay_task: asyncio.Task[ReplaySaveResult] | None = None
 login_limiter = LoginAttemptLimiter()
 
 
-async def cleanup_loop() -> None:
-    while True:
-        await cleanup_old_chunks(settings)
-        await asyncio.sleep(max(settings.chunk_seconds, 1))
+def _is_expected_client_disconnect(context: dict[str, object]) -> bool:
+    """Recognize the harmless Windows error raised when a browser closes MJPEG."""
+
+    exception = context.get("exception")
+    return isinstance(exception, ConnectionResetError) and getattr(exception, "winerror", None) == 10054
 
 
 async def capture_loop() -> None:
+    restart_streak = 0
+    first_start = True
     while True:
-        if not capture.is_running():
+        problem = capture.health_problem()
+        if problem is not None:
+            restart_streak += 1
+            delay = 0.0 if first_start else min(
+                settings.restart_max_backoff_seconds,
+                float(2 ** min(restart_streak - 1, 5)),
+            )
+            first_start = False
+            if delay:
+                logging.warning("Capture reset in %.1fs: %s", delay, problem)
+                await asyncio.sleep(delay)
             try:
-                capture.start()
+                await capture.restart(problem)
             except Exception:
-                logging.exception("Failed to start capture")
-        elif capture.live_frame_age_seconds() is not None and capture.live_frame_age_seconds() > 15:
-            logging.warning("Live frames stalled for %s seconds; restarting capture", capture.live_frame_age_seconds())
-            capture.stop()
-        elif not await capture.check_finalized_chunks():
-            capture.stop()
-        await asyncio.sleep(5)
+                logging.exception("Failed to start a clean capture generation")
+        else:
+            await capture.cleanup_old_chunks()
+            if (capture.generation_age_seconds() or 0) > 30:
+                restart_streak = 0
+        await asyncio.sleep(1)
 
 
 @asynccontextmanager
@@ -72,27 +91,39 @@ async def lifespan(_: FastAPI):
     if len(settings.session_secret) < 32:
         raise RuntimeError("SESSION_SECRET must be at least 32 characters in .env")
     settings.data_dir.mkdir(parents=True, exist_ok=True)
-    # Chunks are an ephemeral rolling buffer. Never mix data from an earlier
-    # application/capture session into a newly saved replay.
     settings.chunk_dir.mkdir(parents=True, exist_ok=True)
-    for old_chunk in settings.chunk_dir.glob("chunk_*.mp4"):
-        try:
-            old_chunk.unlink()
-        except FileNotFoundError:
-            pass
-    cleanup_task = asyncio.create_task(cleanup_loop())
+    settings.work_dir.mkdir(parents=True, exist_ok=True)
+    loop = asyncio.get_running_loop()
+    previous_exception_handler = loop.get_exception_handler()
+
+    def handle_asyncio_exception(event_loop: asyncio.AbstractEventLoop, context: dict[str, object]) -> None:
+        if _is_expected_client_disconnect(context):
+            logging.getLogger("sigit.http").debug("Browser closed a streaming connection")
+            return
+        if previous_exception_handler is not None:
+            previous_exception_handler(event_loop, context)
+        else:
+            event_loop.default_exception_handler(context)
+
+    loop.set_exception_handler(handle_asyncio_exception)
     capture_task = asyncio.create_task(capture_loop())
     try:
         yield
     finally:
-        cleanup_task.cancel()
         capture_task.cancel()
-        capture.stop()
+        await asyncio.gather(capture_task, return_exceptions=True)
+        await capture.stop()
+        loop.set_exception_handler(previous_exception_handler)
 
 
 app = FastAPI(title="Sigit Live", lifespan=lifespan)
 app.add_middleware(PasswordAuthMiddleware, settings=settings)
 app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return Response(status_code=204, headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.get("/login", response_class=HTMLResponse)
@@ -173,7 +204,6 @@ async def highlights(request: Request):
 
 @app.get("/api/status")
 async def status():
-    chunks = recent_chunks(settings, settings.max_buffer_seconds)
     capture_status = capture.status()
     stream_warning = None
     frame_age = capture_status["live_frame_age_seconds"]
@@ -196,8 +226,8 @@ async def status():
         "max_buffer_minutes": settings.max_buffer_minutes,
         "chunk_seconds": settings.chunk_seconds,
         "camera_rotation_degrees": settings.camera_rotation_degrees,
-        "buffered_chunks": len(chunks),
-        "buffered_seconds_estimate": len(chunks) * settings.chunk_seconds,
+        "buffered_chunks": capture_status["buffered_chunks"],
+        "buffered_seconds_estimate": capture_status["buffered_duration_seconds"],
         "stream_warning": stream_warning,
         "ffmpeg_path": discover_ffmpeg_path() or settings.ffmpeg_path,
         "ffmpeg_error": ffmpeg_discovery_error(),
@@ -220,6 +250,7 @@ async def devices():
         }
     ffmpeg_path = discover_ffmpeg_path() or settings.ffmpeg_path
     inventory = list_dshow_devices(ffmpeg_path)
+    capture.devices = inventory
     return {
         "video": inventory.video,
         "audio": inventory.audio,
@@ -269,6 +300,10 @@ async def live_mjpeg():
                 await asyncio.sleep(0)
         except asyncio.CancelledError:
             raise
+        except (ConnectionResetError, BrokenPipeError):
+            # Browsers close the MJPEG request when navigating away. This is a
+            # normal end-of-stream condition, not a camera failure.
+            pass
         finally:
             capture.live_clients = max(0, capture.live_clients - 1)
 
@@ -290,7 +325,7 @@ async def create_replay():
 
     async with replay_lock:
         if replay_task is None or replay_task.done():
-            replay_task = asyncio.create_task(save_replay(settings))
+            replay_task = asyncio.create_task(save_replay(settings, capture))
             deduplicated = False
         else:
             deduplicated = True
@@ -306,6 +341,10 @@ async def create_replay():
         "backup_file": str(result.backup_path) if result.backup_path else None,
         "backup_error": result.backup_error,
         "skipped_chunks": list(result.skipped_chunks),
+        "requested_seconds": result.requested_seconds,
+        "actual_seconds": result.actual_seconds,
+        "partial": result.partial,
+        "reset_generation": result.reset_generation,
     }
 
 

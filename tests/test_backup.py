@@ -56,7 +56,12 @@ class ReplayBackupTests(unittest.TestCase):
         capture = CaptureProcess(settings)
         self.assertTrue(capture._is_corrupt_frame_message("EOI missing, emulating"))
         self.assertTrue(capture._is_corrupt_frame_message("bad vlc 0:0"))
+        self.assertTrue(capture._is_corrupt_frame_message("error dc"))
+        self.assertTrue(capture._is_corrupt_frame_message("error y=42 x=17"))
         self.assertFalse(capture._is_corrupt_frame_message("Error opening output file"))
+        self.assertTrue(capture._is_benign_pixel_format_message(
+            "deprecated pixel format used, make sure you did set range correctly"
+        ))
 
 
 if __name__ == "__main__":

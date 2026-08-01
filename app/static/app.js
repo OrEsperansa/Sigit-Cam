@@ -17,41 +17,39 @@ let lastLiveFrameCount = 0;
 let unchangedStatusPolls = 0;
 let displayedAudioPercent = 0;
 
-async function refreshAudioLevel() {
-  try {
-    const response = await fetch(`/api/audio-level?ts=${Date.now()}`, { cache: "no-store" });
-    if (!response.ok) throw new Error(`audio level ${response.status}`);
-    const level = await response.json();
-    const hasSamples = level.active && Number.isFinite(level.peak_db);
-    const db = hasSamples ? Math.max(-60, Math.min(0, level.peak_db)) : -60;
-    const targetPercent = hasSamples ? ((db + 60) / 60) * 100 : 0;
-    displayedAudioPercent += (targetPercent - displayedAudioPercent) * 0.55;
-    if (targetPercent === 0 && displayedAudioPercent < 0.5) displayedAudioPercent = 0;
-
-    audioMeterFill.style.width = `${displayedAudioPercent.toFixed(1)}%`;
-    audioMeterTrack.setAttribute("aria-valuenow", db.toFixed(1));
-    audioMeterTrack.setAttribute(
-      "aria-valuetext",
-      hasSamples ? `${targetPercent.toFixed(0)} percent, ${level.peak_db.toFixed(1)} decibels` : "No microphone signal",
-    );
-    audioMeterTrack.classList.toggle("receiving", hasSamples && level.peak_db > -55);
-    audioMeterValue.textContent = hasSamples
-      ? `${targetPercent.toFixed(0)}% · ${level.peak_db.toFixed(1)} dB`
-      : "No signal";
-    audioMeterStatus.textContent = !level.microphone
-      ? "No input selected"
-      : !hasSamples
-        ? "Input detected, but no samples are arriving"
-        : level.peak_db > -55
-          ? "Receiving input"
-          : "Receiving silence";
-  } catch (error) {
+function renderAudioLevel(level) {
+  if (!level) {
     displayedAudioPercent = 0;
     audioMeterFill.style.width = "0%";
     audioMeterTrack.setAttribute("aria-valuetext", "Microphone level unavailable");
     audioMeterValue.textContent = "Unavailable";
     audioMeterStatus.textContent = "Cannot read input level";
+    return;
   }
+
+  const hasSamples = level.active && Number.isFinite(level.peakDb);
+  const db = hasSamples ? Math.max(-60, Math.min(0, level.peakDb)) : -60;
+  const targetPercent = hasSamples ? ((db + 60) / 60) * 100 : 0;
+  displayedAudioPercent += (targetPercent - displayedAudioPercent) * 0.55;
+  if (targetPercent === 0 && displayedAudioPercent < 0.5) displayedAudioPercent = 0;
+
+  audioMeterFill.style.width = `${displayedAudioPercent.toFixed(1)}%`;
+  audioMeterTrack.setAttribute("aria-valuenow", db.toFixed(1));
+  audioMeterTrack.setAttribute(
+    "aria-valuetext",
+    hasSamples ? `${targetPercent.toFixed(0)} percent, ${level.peakDb.toFixed(1)} decibels` : "No microphone signal",
+  );
+  audioMeterTrack.classList.toggle("receiving", hasSamples && level.peakDb > -55);
+  audioMeterValue.textContent = hasSamples
+    ? `${targetPercent.toFixed(0)}% · ${level.peakDb.toFixed(1)} dB`
+    : "No signal";
+  audioMeterStatus.textContent = !level.microphone
+    ? "No input selected"
+    : !hasSamples
+      ? "Input detected, but no samples are arriving"
+      : level.peakDb > -55
+        ? "Receiving input"
+        : "Receiving silence";
 }
 
 function showStreamStatus(text) {
@@ -72,10 +70,7 @@ function resetPlayer() {
 }
 
 function setupPlayer() {
-  if (playerStarted) {
-    return;
-  }
-
+  if (playerStarted) return;
   liveImage.src = `/live.mjpg?ts=${Date.now()}`;
   playerStarted = true;
   showLiveImage();
@@ -91,21 +86,26 @@ async function refreshStatus() {
   let status;
   try {
     const response = await fetch(`/api/status?ts=${Date.now()}`, { cache: "no-store" });
-    if (!response.ok) {
-      throw new Error(`status ${response.status}`);
-    }
+    if (!response.ok) throw new Error(`status ${response.status}`);
     status = await response.json();
   } catch (error) {
     captureDot.classList.remove("running");
     captureLabel.textContent = "Service unavailable";
+    renderAudioLevel(null);
     resetPlayer();
     showStreamStatus(`Cannot reach server: ${error.message}`);
     return;
   }
 
+  const capture = status.capture || {};
   captureDot.classList.toggle("running", status.capture_running);
   captureLabel.textContent = status.capture_running ? "Live" : "Offline";
-  buffered.textContent = `${status.buffered_seconds_estimate} sec`;
+  buffered.textContent = `${Number(status.buffered_seconds_estimate || 0).toFixed(1)} sec`;
+  renderAudioLevel({
+    peakDb: capture.audio_peak_db,
+    active: capture.audio_active,
+    microphone: capture.selected_audio_device,
+  });
 
   const backup = status.backup || {};
   if (!backup.configured) {
@@ -115,7 +115,7 @@ async function refreshStatus() {
     backupStatus.textContent = "Copy on save";
     backupStatus.title = backup.path || "";
   }
-  const capture = status.capture || {};
+
   const videoDevice = capture.selected_video_device || "No video source";
   const audioDevice = capture.selected_audio_device || "No audio source";
   const error = capture.recording_warning || capture.last_error || capture.device_error || "";
@@ -132,11 +132,9 @@ async function refreshStatus() {
   }
 
   const liveFrameCount = capture.live_frame_count || 0;
-  if (playerStarted && liveFrameCount === lastLiveFrameCount) {
-    unchangedStatusPolls += 1;
-  } else {
-    unchangedStatusPolls = 0;
-  }
+  unchangedStatusPolls = playerStarted && liveFrameCount === lastLiveFrameCount
+    ? unchangedStatusPolls + 1
+    : 0;
   lastLiveFrameCount = liveFrameCount;
 
   if (playerStarted && unchangedStatusPolls >= 4) {
@@ -145,10 +143,8 @@ async function refreshStatus() {
     setTimeout(setupPlayer, 500);
     return;
   }
-
   setupPlayer();
 }
-
 
 saveButton.addEventListener("click", async () => {
   saveButton.disabled = true;
@@ -156,15 +152,15 @@ saveButton.addEventListener("click", async () => {
   try {
     const response = await fetch("/api/replays", { method: "POST" });
     const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.detail || "Save failed");
-    }
-    const localMessage = data.deduplicated ? "A save is already in progress" : "Saved successfully";
-    const skippedMessage = data.skipped_chunks?.length
-      ? `. Warning: skipped ${data.skipped_chunks.length} corrupt or audio-less segment(s).`
-      : "";
+    if (!response.ok) throw new Error(data.detail || "Save failed");
+    const duration = Number.isFinite(data.actual_seconds) ? `${data.actual_seconds.toFixed(1)} sec` : "replay";
+    const localMessage = data.deduplicated
+      ? "A save was already in progress"
+      : data.partial
+        ? `Saved ${duration} of available footage`
+        : `Saved ${duration}`;
     const backupMessage = data.backup_error ? " Secondary copy failed." : "";
-    message.textContent = `${localMessage}${skippedMessage}${backupMessage}`;
+    message.textContent = `${localMessage}${backupMessage}`;
   } catch (error) {
     message.textContent = error.message;
   } finally {
@@ -173,6 +169,4 @@ saveButton.addEventListener("click", async () => {
 });
 
 refreshStatus();
-refreshAudioLevel();
-setInterval(refreshStatus, 5000);
-setInterval(refreshAudioLevel, 250);
+setInterval(refreshStatus, 2000);
