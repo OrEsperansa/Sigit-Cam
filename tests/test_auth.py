@@ -1,9 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 from dataclasses import replace
 
-from app.auth import LoginAttemptLimiter, safe_next_path, session_token
+from starlette.requests import Request
+from starlette.responses import Response
+
+from app.auth import (
+    COOKIE_NAME,
+    LoginAttemptLimiter,
+    PasswordAuthMiddleware,
+    csrf_token,
+    safe_next_path,
+    session_token,
+)
 from app.config import Settings
 
 
@@ -33,6 +44,38 @@ class AuthTests(unittest.TestCase):
         self.assertTrue(limiter.is_limited("client"))
         limiter.clear("client")
         self.assertFalse(limiter.is_limited("client"))
+
+    def test_authenticated_mutations_require_csrf_header(self) -> None:
+        middleware = PasswordAuthMiddleware(lambda *_: None, settings=self.settings)
+
+        async def request_with(headers: list[tuple[bytes, bytes]]) -> Response:
+            request = Request(
+                {
+                    "type": "http",
+                    "http_version": "1.1",
+                    "method": "POST",
+                    "scheme": "http",
+                    "path": "/api/replays",
+                    "raw_path": b"/api/replays",
+                    "query_string": b"",
+                    "headers": headers,
+                    "client": ("127.0.0.1", 1),
+                    "server": ("127.0.0.1", 8000),
+                }
+            )
+
+            async def call_next(_: Request) -> Response:
+                return Response(status_code=204)
+
+            return await middleware.dispatch(request, call_next)
+
+        cookie = f"{COOKIE_NAME}={session_token(self.settings)}".encode()
+        denied = asyncio.run(request_with([(b"cookie", cookie)]))
+        allowed = asyncio.run(
+            request_with([(b"cookie", cookie), (b"x-csrf-token", csrf_token(self.settings).encode())])
+        )
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(allowed.status_code, 204)
 
 
 if __name__ == "__main__":

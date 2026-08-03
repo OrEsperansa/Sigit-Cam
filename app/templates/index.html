@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="csrf-token" content="{{ csrf_token }}" />
     <title>Sigit Live</title>
     <link rel="stylesheet" href="/static/styles.css?v={{ app_version }}" />
   </head>
@@ -12,7 +13,8 @@
       <div class="nav-links">
         <a class="nav-link active" href="/">Live</a>
         <a class="nav-link" href="/highlights">Library</a>
-        <form method="post" action="/logout"><button class="nav-link nav-button" type="submit">Sign out</button></form>
+        <a class="nav-link" href="/settings">Settings</a>
+        <button class="nav-link nav-button" type="button" data-logout>Sign out</button>
       </div>
     </nav>
 
@@ -31,48 +33,36 @@
 
         <section class="audio-meter" aria-labelledby="audio-meter-label">
           <div class="audio-meter-heading">
-            <span id="audio-meter-label">Microphone volume</span>
+            <span id="audio-meter-label">Microphone</span>
             <span id="audio-meter-value">Waiting</span>
           </div>
           <div id="audio-meter-track" class="audio-meter-track" role="meter"
-            aria-label="Microphone volume" aria-valuemin="-60" aria-valuemax="0" aria-valuenow="-60"
-            aria-valuetext="Waiting for microphone input">
+            aria-label="Microphone volume" aria-valuemin="-60" aria-valuemax="0" aria-valuenow="-60">
             <span id="audio-meter-fill" class="audio-meter-fill"></span>
-          </div>
-          <div class="audio-meter-scale" aria-hidden="true">
-            <span>Low</span><span>Good</span><span>Loud</span>
           </div>
           <p id="audio-meter-status" class="audio-meter-status">Waiting for input</p>
         </section>
 
-        <dl class="stats">
-          <div>
-            <dt>Window</dt>
-            <dd>{{ replay_minutes }} min</dd>
+        <section class="save-card" aria-labelledby="save-heading">
+          <h2 id="save-heading">Save replay</h2>
+          <div id="replay-presets" class="preset-buttons" data-default="{{ default_replay_seconds }}">
+            {% for seconds in replay_presets %}
+            <button type="button" class="preset-button" data-seconds="{{ seconds }}">{{ seconds }} sec</button>
+            {% endfor %}
           </div>
-          <div>
-            <dt>Segment</dt>
-            <dd>{{ chunk_seconds }} sec</dd>
-          </div>
-          <div>
-            <dt>Available</dt>
-            <dd id="buffered">0 sec</dd>
-          </div>
-          <div>
-            <dt>Orientation</dt>
-            <dd>{{ camera_rotation_degrees }} deg</dd>
-          </div>
-          <div>
-            <dt>Storage</dt>
-            <dd id="backup-status">Checking</dd>
-          </div>
-        </dl>
+          <button id="save-button" type="button">Save replay <span class="shortcut-hint">R</span></button>
+          <p id="message" class="message" aria-live="polite"></p>
+        </section>
 
-        <button id="save-button" type="button">Save</button>
-        <p id="message" class="message"></p>
+        <dl class="stats">
+          <div><dt>Available</dt><dd id="buffered">0 sec</dd></div>
+          <div><dt>Storage free</dt><dd id="storage-free">Checking</dd></div>
+          <div><dt>Backup</dt><dd id="backup-status">Checking</dd></div>
+        </dl>
       </aside>
     </main>
 
+    <script src="/static/common.js?v={{ app_version }}"></script>
     <script src="/static/app.js?v={{ app_version }}"></script>
   </body>
 </html>

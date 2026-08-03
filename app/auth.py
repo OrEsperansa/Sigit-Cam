@@ -14,6 +14,7 @@ from .config import Settings
 
 
 COOKIE_NAME = "sigit_cam_session"
+CSRF_HEADER = "X-CSRF-Token"
 PUBLIC_PATHS = {"/login", "/favicon.ico", "/static/login.css"}
 
 
@@ -21,6 +22,14 @@ def session_token(settings: Settings) -> str:
     return hmac.new(
         settings.session_secret.encode("utf-8"),
         b"sigit-cam-authenticated-v1",
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def csrf_token(settings: Settings) -> str:
+    return hmac.new(
+        settings.session_secret.encode("utf-8"),
+        b"sigit-csrf-v1",
         hashlib.sha256,
     ).hexdigest()
 
@@ -51,6 +60,11 @@ class PasswordAuthMiddleware(BaseHTTPMiddleware):
                 query = urlencode({"next": request.url.path})
                 return RedirectResponse(f"/login?{query}", status_code=303)
             return JSONResponse({"detail": "Authentication required"}, status_code=401)
+
+        if not is_public and request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            supplied = request.headers.get(CSRF_HEADER, "")
+            if not supplied or not hmac.compare_digest(supplied, csrf_token(self.settings)):
+                return JSONResponse({"detail": "Invalid CSRF token"}, status_code=403)
 
         response = await call_next(request)
         if not is_public:

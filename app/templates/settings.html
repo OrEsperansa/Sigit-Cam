@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="csrf-token" content="{{ csrf_token }}" />
+    <title>Settings - Sigit Live</title>
+    <link rel="stylesheet" href="/static/styles.css?v={{ app_version }}" />
+  </head>
+  <body>
+    <nav class="top-nav" aria-label="Primary navigation">
+      <a class="brand" href="/">Sigit Live</a>
+      <div class="nav-links">
+        <a class="nav-link" href="/">Live</a>
+        <a class="nav-link" href="/highlights">Library</a>
+        <a class="nav-link active" href="/settings">Settings</a>
+        <button class="nav-link nav-button" type="button" data-logout>Sign out</button>
+      </div>
+    </nav>
+
+    <main class="settings-shell">
+      <header class="settings-header">
+        <h1>Settings</h1>
+        <p>Capture changes are tested for up to 20 seconds and saved to <code>.env</code> only if video, audio, and rolling chunks are healthy.</p>
+      </header>
+      <form id="settings-form" class="settings-form">
+        <section class="settings-card">
+          <div class="section-heading"><h2>Camera and microphone</h2><button id="refresh-devices" class="secondary-button" type="button">Refresh devices</button></div>
+          <label>Video device <select id="video_device" data-setting></select></label>
+          <label>Audio device <select id="audio_device" data-setting></select></label>
+          <div class="field-grid">
+            <label>Resolution <input id="video_resolution" data-setting placeholder="1280x720" /></label>
+            <label>Frames per second <input id="fps" data-setting type="number" min="1" max="120" /></label>
+            <label>Rotation <select id="camera_rotation_degrees" data-setting><option value="0">0°</option><option value="90">90°</option><option value="180">180°</option><option value="270">270°</option></select></label>
+            <label>Audio sync offset (ms) <input id="audio_sync_offset_ms" data-setting type="number" min="-5000" max="5000" /></label>
+          </div>
+        </section>
+
+        <section class="settings-card">
+          <h2>Instant replay</h2>
+          <label>Presets in seconds <input id="replay_presets_seconds" data-setting placeholder="30, 60, 180" /></label>
+          <div class="field-grid">
+            <label>Default preset <select id="default_replay_seconds" data-setting></select></label>
+            <label>Rolling buffer (minutes) <input id="max_buffer_minutes" data-setting type="number" min="1" /></label>
+          </div>
+          <p class="muted">The rolling buffer must be long enough for the largest preset.</p>
+        </section>
+
+        <section class="settings-card">
+          <h2>Live preview</h2>
+          <div class="field-grid">
+            <label>Preview FPS <input id="live_fps" data-setting type="number" min="1" max="30" /></label>
+            <label>Preview width <input id="live_width" data-setting type="number" min="160" /></label>
+            <label>JPEG quality (2–31) <input id="live_jpeg_quality" data-setting type="number" min="2" max="31" /></label>
+          </div>
+        </section>
+
+        <section class="settings-card">
+          <h2>Backup</h2>
+          <label>Backup folder <input id="replay_backup_dir" data-setting placeholder="Leave empty to disable" /></label>
+          <button id="test-backup" class="secondary-button" type="button">Test saved backup folder</button>
+          <p id="backup-test-message" class="message"></p>
+        </section>
+
+        <details class="settings-card">
+          <summary>Advanced reliability</summary>
+          <div class="field-grid advanced-grid">
+            <label>DirectShow buffer <input id="dshow_rtbufsize" data-setting /></label>
+            <label>Audio startup grace (sec) <input id="audio_startup_grace_seconds" data-setting type="number" step="0.5" min="0" /></label>
+            <label>Audio stall timeout (sec) <input id="audio_stall_seconds" data-setting type="number" step="0.5" min="1" /></label>
+            <label>Video stall timeout (sec) <input id="video_stall_seconds" data-setting type="number" step="0.5" min="1" /></label>
+            <label>Maximum restart backoff (sec) <input id="restart_max_backoff_seconds" data-setting type="number" step="0.5" min="1" /></label>
+          </div>
+        </details>
+
+        <div class="settings-save-bar">
+          <p id="settings-message" class="message" aria-live="polite"></p>
+          <button id="save-settings" class="primary-button" type="submit">Test and save settings</button>
+        </div>
+      </form>
+      <p class="security-note">Application password and session secret are intentionally not editable here. Manage them directly in <code>.env</code>.</p>
+    </main>
+    <script src="/static/common.js?v={{ app_version }}"></script>
+    <script src="/static/settings.js?v={{ app_version }}"></script>
+  </body>
+</html>

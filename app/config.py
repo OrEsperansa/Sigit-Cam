@@ -39,6 +39,13 @@ def _bool_env(name: str, default: bool) -> bool:
     return value.lower() not in {"0", "false", "no"}
 
 
+def _int_tuple_env(name: str, default: tuple[int, ...]) -> tuple[int, ...]:
+    value = os.getenv(name, "").strip()
+    if not value:
+        return default
+    return tuple(int(item.strip()) for item in value.split(",") if item.strip())
+
+
 @dataclass(frozen=True)
 class Settings:
     host: str = os.getenv("HOST", "0.0.0.0")
@@ -53,6 +60,8 @@ class Settings:
     audio_device: str = os.getenv("AUDIO_DEVICE", "")
 
     replay_minutes: int = _int_env("REPLAY_MINUTES", 3)
+    replay_presets_seconds: tuple[int, ...] = _int_tuple_env("REPLAY_PRESETS_SECONDS", (30, 60, 180))
+    default_replay_seconds: int = _int_env("DEFAULT_REPLAY_SECONDS", _int_env("REPLAY_MINUTES", 3) * 60)
     max_buffer_minutes: int = _int_env("MAX_BUFFER_MINUTES", 5)
     chunk_seconds: int = _int_env("CHUNK_SECONDS", 2)
     video_resolution: str = os.getenv("VIDEO_RESOLUTION", "1280x720")
@@ -75,10 +84,11 @@ class Settings:
     chunk_dir: Path = BASE_DIR / "data" / "chunks"
     replay_dir: Path = BASE_DIR / "data" / "replays"
     work_dir: Path = BASE_DIR / "data" / "work"
+    trash_dir: Path = BASE_DIR / "data" / "trash"
 
     @property
     def replay_seconds(self) -> int:
-        return self.replay_minutes * 60
+        return self.default_replay_seconds
 
     @property
     def max_buffer_seconds(self) -> int:
@@ -89,10 +99,14 @@ class Settings:
             raise RuntimeError("INPUT_MODE must be dshow on the Windows capture host")
         if not self.video_device.strip() or not self.audio_device.strip():
             raise RuntimeError("VIDEO_DEVICE and AUDIO_DEVICE must be exact DirectShow device names")
-        if self.replay_minutes <= 0:
-            raise RuntimeError("REPLAY_MINUTES must be positive")
-        if self.max_buffer_minutes < self.replay_minutes:
-            raise RuntimeError("MAX_BUFFER_MINUTES must be at least REPLAY_MINUTES")
+        if not self.replay_presets_seconds or any(seconds <= 0 for seconds in self.replay_presets_seconds):
+            raise RuntimeError("REPLAY_PRESETS_SECONDS must contain positive durations")
+        if tuple(sorted(set(self.replay_presets_seconds))) != self.replay_presets_seconds:
+            raise RuntimeError("REPLAY_PRESETS_SECONDS must be unique and sorted")
+        if self.default_replay_seconds not in self.replay_presets_seconds:
+            raise RuntimeError("DEFAULT_REPLAY_SECONDS must be one of REPLAY_PRESETS_SECONDS")
+        if self.max_buffer_seconds < max(self.replay_presets_seconds):
+            raise RuntimeError("MAX_BUFFER_MINUTES must cover the longest replay preset")
         if self.chunk_seconds <= 0:
             raise RuntimeError("CHUNK_SECONDS must be positive")
         if self.fps <= 0 or self.live_fps <= 0 or self.live_width <= 0:
@@ -101,6 +115,8 @@ class Settings:
             raise RuntimeError("Audio watchdog intervals must be positive")
         if self.video_stall_seconds <= 0 or self.restart_max_backoff_seconds <= 0:
             raise RuntimeError("Video watchdog and restart backoff intervals must be positive")
+        if not 2 <= self.live_jpeg_quality <= 31:
+            raise RuntimeError("LIVE_JPEG_QUALITY must be between 2 and 31")
 
 
 settings = Settings()

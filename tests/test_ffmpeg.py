@@ -7,11 +7,12 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from time import monotonic
 from unittest.mock import AsyncMock, patch
 
 from app.config import Settings
-from app.ffmpeg import CaptureProcess, discover_ffmpeg_path, save_replay, validate_media
+from app.ffmpeg import CaptureProcess, discover_ffmpeg_path, list_dshow_devices, save_replay, validate_media
 
 
 class CaptureTests(unittest.TestCase):
@@ -45,6 +46,23 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual(command.count("-i"), 1)
         self.assertNotIn("-fflags", command)
         self.assertNotIn("-reset_timestamps", command)
+
+    def test_ffmpeg_6_device_labels_are_detected_without_section_headers(self) -> None:
+        stderr = "\n".join(
+            [
+                '[dshow @ 1] "USB Camera" (video)',
+                '[dshow @ 1]   Alternative name "@device_camera"',
+                '[dshow @ 1] "Desk Microphone" (audio)',
+                '[dshow @ 1]   Alternative name "@device_microphone"',
+            ]
+        )
+        completed = SimpleNamespace(stderr=stderr)
+        with patch("app.ffmpeg.subprocess.run", return_value=completed):
+            devices = list_dshow_devices("ffmpeg.exe")
+
+        self.assertEqual(devices.video, ["USB Camera"])
+        self.assertEqual(devices.audio, ["Desk Microphone"])
+        self.assertIsNone(devices.error)
 
     def test_recording_is_closed_gop_libx264_flushed_mpegts(self) -> None:
         capture = CaptureProcess(self.make_settings(Path("test-data"), fps=30, chunk_seconds=2))
@@ -130,6 +148,22 @@ class CaptureTests(unittest.TestCase):
 
             asyncio.run(snapshot_test())
 
+    def test_snapshot_rejects_save_before_copy_when_disk_space_is_insufficient(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            settings = self.make_settings(root)
+            settings.chunk_dir.mkdir()
+            capture = CaptureProcess(settings)
+            capture.generation = 1
+            capture.session_id = "g000001_test"
+            capture.started_at = monotonic() - 5
+            (settings.chunk_dir / "chunk_g000001_test_000000.ts").write_bytes(b"A" * 188)
+
+            with patch("app.ffmpeg.shutil.disk_usage", return_value=SimpleNamespace(free=0)):
+                with self.assertRaisesRegex(RuntimeError, "Not enough free space"):
+                    asyncio.run(capture.snapshot_buffer(1))
+            self.assertFalse(settings.work_dir.exists())
+
     def test_recoverable_mjpeg_messages_are_classified_without_reset(self) -> None:
         capture = CaptureProcess(self.make_settings(Path("test-data")))
         self.assertTrue(capture._is_corrupt_frame_message("error dc"))
@@ -186,6 +220,7 @@ class SyntheticFFmpegTests(unittest.TestCase):
             self.assertGreater(media.audio_samples, 0)
             self.assertGreater(result.actual_seconds, 3.0)
             self.assertLessEqual(result.actual_seconds, 5.5)
+            self.assertFalse(result.partial)
             self.assertEqual(result.reset_generation, 1)
 
 

@@ -27,7 +27,8 @@ Set both names in `.env`; automatic selection is intentionally unsupported becau
 ```text
 VIDEO_DEVICE=Creative Live! Cam Sync 1080p V2
 AUDIO_DEVICE=Microphone (Example Device)
-REPLAY_MINUTES=3
+REPLAY_PRESETS_SECONDS=30,60,180
+DEFAULT_REPLAY_SECONDS=180
 ```
 
 Also set `APP_PASSWORD` and a random `SESSION_SECRET` containing at least 32 characters.
@@ -54,9 +55,14 @@ Runtime files are created under:
 data/chunks/   ephemeral rolling MPEG-TS segments
 data/work/     temporary immutable replay snapshots
 data/replays/  validated MP4 replays
+data/trash/    replays moved to recoverable Trash
 ```
 
-`REPLAY_BACKUP_DIR` optionally copies only the replay just saved. It does not scan or synchronize folders. The copy runs only after local validation and uses an atomic replacement; a backup failure does not remove the local replay.
+`REPLAY_BACKUP_DIR` optionally copies only the replay just saved and its initial JSON metadata sidecar. It does not scan or synchronize folders, and later metadata edits remain local. The copy runs only after local validation and uses an atomic replacement; a backup failure does not remove the local replay.
+
+The protected Settings page can change camera, microphone, preview, replay, watchdog, and backup values. Capture changes reset the rolling buffer, run in memory first, and are written atomically to `.env` only after video, audio, and rolling chunks become healthy. A failed test restores the previous capture configuration.
+
+Each replay has a JSON sidecar for title, notes, tags, favorite state, and backup status. The Library supports search, thumbnails, metadata edits, and a recoverable Trash. Storage warnings are informational; Sigit Live never deletes recordings automatically.
 
 ## Verification
 

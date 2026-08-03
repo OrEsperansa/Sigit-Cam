@@ -3,8 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="csrf-token" content="{{ csrf_token }}" />
     <title>Library - Sigit Live</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v={{ app_version }}" />
   </head>
   <body>
     <nav class="top-nav" aria-label="Primary navigation">
@@ -12,29 +13,53 @@
       <div class="nav-links">
         <a class="nav-link" href="/">Live</a>
         <a class="nav-link active" href="/highlights">Library</a>
-        <form method="post" action="/logout"><button class="nav-link nav-button" type="submit">Sign out</button></form>
+        <a class="nav-link" href="/settings">Settings</a>
+        <button class="nav-link nav-button" type="button" data-logout>Sign out</button>
       </div>
     </nav>
 
     <main class="highlights-shell">
       <section class="highlight-player-section">
         <video id="highlight-player" class="highlight-player hidden" controls preload="metadata"></video>
-        <div id="highlight-empty" class="highlight-empty">Select an item to view it here.</div>
-        <div class="highlight-details">
-          <h1 id="highlight-title">Library</h1>
-          <p id="highlight-meta">Saved items are loaded from this machine.</p>
-        </div>
+        <div id="highlight-empty" class="highlight-empty">Select a replay to view and edit it.</div>
+
+        <form id="metadata-form" class="metadata-form hidden">
+          <div class="metadata-heading">
+            <h1>Replay details</h1>
+            <label class="favorite-label"><input id="replay-favorite" type="checkbox" /> Favorite</label>
+          </div>
+          <p id="highlight-meta" class="muted"></p>
+          <label>Title <input id="replay-title" maxlength="200" required /></label>
+          <label>Tags <input id="replay-tags" placeholder="goal, first half" /></label>
+          <label>Notes <textarea id="replay-notes" maxlength="5000" rows="4"></textarea></label>
+          <div class="form-actions">
+            <button class="primary-button" type="submit">Save details</button>
+            <a id="download-replay" class="secondary-link" download>Download</a>
+            <button id="trash-replay" class="danger-button" type="button">Move to Trash</button>
+          </div>
+          <p id="metadata-message" class="message" aria-live="polite"></p>
+        </form>
       </section>
 
       <aside class="highlight-list-panel">
         <div class="highlight-list-header">
-          <h2>Saved Items</h2>
+          <h2>Saved replays</h2>
           <button id="refresh-highlights" class="secondary-button" type="button">Refresh</button>
         </div>
+        <div class="library-tabs" role="tablist">
+          <button class="library-tab active" type="button" data-mode="library">Library</button>
+          <button class="library-tab" type="button" data-mode="trash">Trash</button>
+        </div>
+        <div class="library-filters">
+          <input id="replay-search" type="search" placeholder="Search title, notes, or tags" />
+          <label><input id="favorite-filter" type="checkbox" /> Favorites only</label>
+        </div>
+        <p id="storage-summary" class="storage-summary">Checking storage</p>
         <div id="highlight-list" class="highlight-list"></div>
       </aside>
     </main>
 
+    <script src="/static/common.js?v={{ app_version }}"></script>
     <script src="/static/highlights.js?v={{ app_version }}"></script>
   </body>
 </html>

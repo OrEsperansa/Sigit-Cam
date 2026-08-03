@@ -14,7 +14,6 @@ from pathlib import Path
 from time import monotonic
 from uuid import uuid4
 
-from .backup import copy_replay_atomic
 from .config import BASE_DIR, Settings
 
 
@@ -164,13 +163,25 @@ def list_dshow_devices(ffmpeg_path: str) -> DeviceInventory:
         if "directshow audio devices" in lower:
             section = "audio"
             continue
+        line_section = section
+        if "(video)" in lower:
+            line_section = "video"
+        elif "(audio)" in lower:
+            line_section = "audio"
         match = pattern.search(line)
-        if not match or not section or match.group(1).startswith("@device_"):
+        if not match or not line_section or match.group(1).startswith("@device_"):
             continue
-        target = video if section == "video" else audio
+        target = video if line_section == "video" else audio
         if match.group(1) not in target:
             target.append(match.group(1))
-    error = None if video and audio else "An exact DirectShow camera and microphone are required"
+    if video and audio:
+        error = None
+    elif not video and not audio:
+        error = "No DirectShow camera or microphone was detected"
+    elif not video:
+        error = "No DirectShow camera was detected"
+    else:
+        error = "No DirectShow microphone was detected"
     return DeviceInventory(video=video, audio=audio, error=error)
 
 
@@ -618,8 +629,19 @@ class CaptureProcess:
                     continue
             if not chunks:
                 raise RuntimeError("The replay buffer is empty")
-            take = max(math.ceil(seconds / self.settings.chunk_seconds), 1)
+            # The newest segment is still being written and is usually shorter
+            # than chunk_seconds. Include one finalized segment of context so a
+            # request made between boundaries still contains the complete tail.
+            take = max(math.ceil(seconds / self.settings.chunk_seconds) + 1, 2)
             selected = chunks[-take:]
+            snapshot_bytes = sum(path.stat().st_size for path in selected)
+            required_bytes = int(snapshot_bytes * 2.5) + 512 * 1024 * 1024
+            free_bytes = shutil.disk_usage(self.settings.data_dir).free
+            if free_bytes < required_bytes:
+                raise RuntimeError(
+                    f"Not enough free space to save this replay: need {required_bytes} bytes, "
+                    f"have {free_bytes}"
+                )
             workspace.mkdir(parents=True, exist_ok=False)
             self._active_workspaces.add(workspace)
             snapshots: list[Path] = []
@@ -722,7 +744,7 @@ def _run_remux(source: Path, destination: Path, timeout: float) -> None:
         "-c:v", "copy",
         "-c:a", "aac",
         "-b:a", "160k",
-        "-af", "aresample=async=1000:first_pts=0",
+        "-af", "asetpts=PTS-STARTPTS,aresample=async=1000:first_pts=0",
         "-avoid_negative_ts", "make_zero",
         "-movflags", "+faststart",
         "-y", str(destination),
@@ -747,9 +769,10 @@ def validate_media(path: Path, timeout: float = 180) -> MediaValidation:
         "-i", str(path),
         "-map", "0:v:0",
         "-map", "0:a:0",
-        "-c:v", "copy",
-        "-af",
-        "astats=metadata=0:reset=0:measure_perchannel=none:measure_overall=Number_of_samples",
+        # Decode both streams. Stream-copy validation can report frames while
+        # never proving that the H.264 payload is actually decodable.
+        "-c:v", "wrapped_avframe",
+        "-c:a", "pcm_s16le",
         "-progress", "pipe:1",
         "-nostats",
         "-f", "null", "-",
@@ -782,18 +805,54 @@ def validate_media(path: Path, timeout: float = 180) -> MediaValidation:
                 duration = max(duration, int(value) / 1_000_000)
             except ValueError:
                 pass
-    samples = 0
-    for match in re.finditer(r"Number of samples:\s*([0-9]+)", result.stderr, re.IGNORECASE):
-        samples = max(samples, int(match.group(1)))
-
     if result.returncode != 0:
-        return MediaValidation(False, duration, frames, samples, result.stderr[-2000:].strip())
+        return MediaValidation(False, duration, frames, 0, result.stderr[-2000:].strip())
     if frames <= 0:
-        return MediaValidation(False, duration, frames, samples, "Replay contains no video frames")
-    if samples <= 0:
-        return MediaValidation(False, duration, frames, samples, "Replay contains no decoded audio samples")
+        return MediaValidation(False, duration, frames, 0, "Replay contains no decoded video frames")
     if duration <= 0:
-        return MediaValidation(False, duration, frames, samples, "Replay duration is zero")
+        return MediaValidation(False, duration, frames, 0, "Replay duration is zero")
+
+    # FFmpeg's astats summary is not a stable machine-readable interface across
+    # builds. A one-frame framemd5 output proves that an audio packet was
+    # decoded, and its duration field provides a real sample count.
+    audio_command = [
+        require_ffmpeg_path(),
+        "-hide_banner", "-loglevel", "error",
+        "-i", str(path),
+        "-map", "0:a:0",
+        "-frames:a", "1",
+        "-f", "framemd5", "-",
+    ]
+    try:
+        audio_result = subprocess.run(
+            audio_command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=min(timeout, 30.0),
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return MediaValidation(False, duration, frames, 0, str(exc))
+    samples = 0
+    for line in audio_result.stdout.splitlines():
+        if line.startswith("#"):
+            continue
+        fields = [field.strip() for field in line.split(",")]
+        if len(fields) >= 4:
+            try:
+                samples = max(samples, int(fields[3]))
+            except ValueError:
+                continue
+    if audio_result.returncode != 0 or samples <= 0:
+        detail = audio_result.stderr[-2000:].strip()
+        return MediaValidation(
+            False,
+            duration,
+            frames,
+            samples,
+            detail or "Replay contains no decoded audio samples",
+        )
     return MediaValidation(True, duration, frames, samples)
 
 
@@ -817,22 +876,14 @@ async def save_replay(
             raise RuntimeError(f"Saved replay validation failed: {validation.error}")
         os.replace(temporary, output)
 
-        backup_path: Path | None = None
-        backup_error: str | None = None
-        try:
-            backup_path = await asyncio.to_thread(copy_replay_atomic, settings, output)
-        except OSError as exc:
-            backup_error = str(exc)
-            LOGGER.error("Replay %s was saved locally but backup failed: %s", output.name, exc)
-
         return ReplaySaveResult(
             output=output,
             requested_seconds=requested,
             actual_seconds=validation.duration_seconds,
             partial=validation.duration_seconds + 0.5 < requested,
             reset_generation=snapshot.generation,
-            backup_path=backup_path,
-            backup_error=backup_error,
+            backup_path=None,
+            backup_error=None,
         )
     finally:
         temporary.unlink(missing_ok=True)

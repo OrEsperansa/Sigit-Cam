@@ -477,6 +477,67 @@ h2 {
   font-size: 12px;
 }
 
+input,
+select,
+textarea {
+  width: 100%;
+  min-height: 40px;
+  padding: 9px 11px;
+  border: 1px solid #36404c;
+  border-radius: 6px;
+  background: #101419;
+  color: #f4f6f8;
+  font: inherit;
+}
+
+textarea { resize: vertical; }
+input:focus, select:focus, textarea:focus { border-color: #4b8de8; outline: none; }
+.muted, .security-note { color: #aab3bf; }
+.primary-button { padding: 0 16px; background: #2f7de1; }
+.danger-button { padding: 0 14px; background: #9c3434; }
+.secondary-link { display: inline-grid; place-items: center; min-height: 40px; padding: 0 14px; border: 1px solid #36404c; border-radius: 6px; color: #e7eef7; text-decoration: none; font-weight: 700; }
+
+.save-card { display: grid; gap: 12px; padding: 16px; border: 1px solid #2a3038; border-radius: 8px; background: #14181d; }
+.preset-buttons { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.preset-button { min-height: 36px; border: 1px solid #36404c; background: #252b33; }
+.preset-button.active { border-color: #4b8de8; background: #23446d; }
+.shortcut-hint { float: right; padding: 1px 6px; border: 1px solid rgb(255 255 255 / 35%); border-radius: 4px; font-size: 11px; }
+
+.metadata-form { display: grid; gap: 12px; max-width: 900px; }
+.metadata-form label, .settings-form label { display: grid; gap: 6px; color: #d7dee7; font-size: 13px; font-weight: 700; }
+.metadata-heading, .section-heading, .form-actions, .settings-save-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.favorite-label { display: flex !important; align-items: center; }
+.favorite-label input, .library-filters input[type="checkbox"] { width: auto; min-height: 0; }
+.form-actions { justify-content: flex-start; flex-wrap: wrap; }
+
+.library-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 12px; }
+.library-tab { border: 1px solid #36404c; background: #20252c; }
+.library-tab.active { border-color: #4b8de8; background: #23446d; }
+.library-filters { display: grid; gap: 10px; margin-bottom: 12px; }
+.library-filters label { display: flex; align-items: center; gap: 7px; color: #aab3bf; font-size: 13px; }
+.storage-summary { margin: 10px 0 16px; padding: 9px; border-radius: 6px; background: #20252c; color: #aab3bf; font-size: 12px; }
+.storage-summary.warning { color: #f0cf70; }
+.storage-summary.critical { color: #ff918a; }
+.highlight-item { grid-template-columns: minmax(0, 1fr); }
+.highlight-select { grid-template-columns: 112px minmax(0, 1fr); align-items: center; }
+.replay-thumbnail { width: 112px; height: 64px; border: 0; border-radius: 4px; object-fit: cover; }
+.replay-card-copy { display: grid; gap: 5px; }
+.card-actions { display: flex; gap: 7px; }
+.small-button { min-height: 32px; padding: 0 10px; border: 1px solid #36404c; background: #252b33; font-size: 12px; }
+.danger-text { color: #ff918a; }
+
+.settings-shell { width: min(100% - 32px, 920px); margin: 0 auto; padding: 28px 0 48px; }
+.settings-header { margin-bottom: 20px; }
+.settings-header p { max-width: 760px; color: #aab3bf; line-height: 1.5; }
+.settings-form { display: grid; gap: 16px; }
+.settings-card { display: grid; gap: 14px; padding: 20px; border: 1px solid #2a3038; border-radius: 8px; background: #181c21; }
+.settings-card summary { cursor: pointer; font-weight: 800; }
+.field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.advanced-grid { margin-top: 16px; }
+.settings-save-bar { position: sticky; bottom: 0; z-index: 3; padding: 12px 0; background: rgb(18 20 23 / 94%); }
+.settings-save-bar .message { margin: 0; }
+.security-note { font-size: 13px; }
+
 @media (max-width: 900px) {
   .top-nav {
     align-items: stretch;
@@ -510,4 +571,9 @@ h2 {
   .highlight-player {
     max-height: 60vh;
   }
+
+  .field-grid { grid-template-columns: 1fr; }
+  .highlight-select { grid-template-columns: 84px minmax(0, 1fr); }
+  .replay-thumbnail { width: 84px; height: 52px; }
+  .settings-save-bar { align-items: stretch; flex-direction: column; }
 }
