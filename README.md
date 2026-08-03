@@ -58,7 +58,7 @@ data/replays/  validated MP4 replays
 data/trash/    replays moved to recoverable Trash
 ```
 
-`REPLAY_BACKUP_DIR` optionally copies only the replay just saved and its initial JSON metadata sidecar. It does not scan or synchronize folders, and later metadata edits remain local. The copy runs only after local validation and uses an atomic replacement; a backup failure does not remove the local replay.
+`REPLAY_BACKUP_DIR` optionally copies only the replay just saved and its initial JSON metadata sidecar. It does not scan or synchronize folders, and later metadata edits remain local. The copy starts in the background only after local validation and publication. Backup availability is never part of replay validation, never delays a successful Save response, and a backup failure does not remove the local replay.
 
 The protected Settings page can change camera, microphone, preview, replay, watchdog, and backup values. Capture changes reset the rolling buffer, run in memory first, and are written atomically to `.env` only after video, audio, and rolling chunks become healthy. A failed test restores the previous capture configuration.
 

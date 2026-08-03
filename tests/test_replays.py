@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import tempfile
+import threading
+import time
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -68,6 +70,50 @@ class ReplayCatalogTests(unittest.TestCase):
             self.assertEqual((status, error), ("complete", None))
             self.assertEqual((catalog.settings.replay_backup_dir / media.name).read_bytes(), b"validated-video")
             self.assertTrue((catalog.settings.replay_backup_dir / media.with_suffix(".json").name).is_file())
+
+    def test_optional_background_backup_does_not_delay_local_success(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            catalog = self.make_catalog(root, backup=True)
+            catalog.settings.replay_dir.mkdir(parents=True)
+            media = catalog.settings.replay_dir / "replay_20260803_120000_000003.mp4"
+            media.write_bytes(b"validated-video")
+            record = catalog.register(ReplaySaveResult(media, 30, 30, False, 4))
+            started = threading.Event()
+            release = threading.Event()
+
+            def slow_backup(_: str) -> tuple[str, str | None]:
+                started.set()
+                release.wait(5)
+                return "complete", None
+
+            try:
+                with patch.object(catalog, "backup_new_pair", side_effect=slow_backup):
+                    before = time.monotonic()
+                    status = catalog.start_backup(str(record["id"]))
+                    elapsed = time.monotonic() - before
+                    self.assertTrue(started.wait(1))
+                    self.assertEqual(status, "pending")
+                    self.assertLess(elapsed, 0.5)
+                    self.assertEqual(catalog.get(str(record["id"]))["backup_status"], "pending")
+            finally:
+                release.set()
+
+    def test_unexpected_backup_error_is_recorded_not_raised(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            catalog = self.make_catalog(root, backup=True)
+            catalog.settings.replay_dir.mkdir(parents=True)
+            media = catalog.settings.replay_dir / "replay_20260803_120000_000004.mp4"
+            media.write_bytes(b"validated-video")
+            record = catalog.register(ReplaySaveResult(media, 30, 30, False, 4))
+
+            with self.assertLogs("sigit.replays", level="ERROR"):
+                with patch("app.replays.copy_replay_atomic", side_effect=RuntimeError("share offline")):
+                    status, error = catalog.backup_new_pair(str(record["id"]))
+            self.assertEqual(status, "failed")
+            self.assertEqual(error, "share offline")
+            self.assertEqual(catalog.get(str(record["id"]))["backup_status"], "failed")
 
 
 if __name__ == "__main__":

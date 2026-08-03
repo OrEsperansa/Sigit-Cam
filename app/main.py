@@ -388,10 +388,9 @@ async def create_replay(request: Request):
     try:
         result = await replay_task
         record = await asyncio.to_thread(catalog.register, result)
-        backup_status, backup_error = await asyncio.to_thread(catalog.backup_new_pair, str(record["id"]))
-        record = await asyncio.to_thread(catalog.get, str(record["id"]))
-        record["backup_status"] = backup_status
-        record["backup_error"] = backup_error
+        # The validated local MP4 is the success boundary. Optional backup is
+        # deliberately detached so an offline share cannot fail or delay Save.
+        record["backup_status"] = catalog.start_backup(str(record["id"]))
         return record
     except HTTPException:
         raise

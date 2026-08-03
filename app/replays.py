@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -17,12 +18,14 @@ from .ffmpeg import ReplaySaveResult, require_ffmpeg_path
 
 SCHEMA_VERSION = 1
 REPLAY_ID_PATTERN = re.compile(r"^replay_[A-Za-z0-9_]+$")
+LOGGER = logging.getLogger("sigit.replays")
 
 
 class ReplayCatalog:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self._lock = threading.RLock()
+        self._backups_in_progress: set[str] = set()
 
     def update_settings(self, settings: Settings) -> None:
         self.settings = settings
@@ -106,24 +109,74 @@ class ReplayCatalog:
     def backup_new_pair(self, replay_id: str) -> tuple[str, str | None]:
         with self._lock:
             media = self._media_path(replay_id)
+            if not media.is_file():
+                raise FileNotFoundError(replay_id)
             record = self._load_record(media)
             if self.settings.replay_backup_dir is None:
                 record["backup_status"] = "disabled"
                 record["backup_error"] = None
                 self._write_record(record)
                 return "disabled", None
+            backup_settings = self.settings
+
+        try:
+            # Network or removable-drive I/O must never hold the catalog lock.
+            copy_replay_atomic(backup_settings, media)
+            self._set_backup_status(replay_id, "complete", None)
+            copy_replay_atomic(backup_settings, media.with_suffix(".json"))
+            return "complete", None
+        except Exception as exc:
+            error = str(exc) or type(exc).__name__
+            self._set_backup_status(replay_id, "failed", error)
+            LOGGER.error("Optional backup failed for %s: %s", replay_id, error)
+            return "failed", error
+
+    def start_backup(self, replay_id: str) -> str:
+        """Start an optional daemon copy without delaying local replay success."""
+        with self._lock:
+            media = self._media_path(replay_id)
+            if not media.is_file():
+                raise FileNotFoundError(replay_id)
+            if self.settings.replay_backup_dir is None:
+                self._set_backup_status(replay_id, "disabled", None)
+                return "disabled"
+            if replay_id in self._backups_in_progress:
+                return "pending"
+            self._set_backup_status(replay_id, "pending", None)
+            self._backups_in_progress.add(replay_id)
+
+        def worker() -> None:
             try:
-                copy_replay_atomic(self.settings, media)
-                record["backup_status"] = "complete"
-                record["backup_error"] = None
-                self._write_record(record)
-                copy_replay_atomic(self.settings, media.with_suffix(".json"))
-                return "complete", None
-            except OSError as exc:
-                record["backup_status"] = "failed"
-                record["backup_error"] = str(exc)
-                self._write_record(record)
-                return "failed", str(exc)
+                self.backup_new_pair(replay_id)
+            except Exception:
+                # backup_new_pair already contains normal I/O failures. This
+                # guard ensures an unexpected backup bug cannot affect capture.
+                LOGGER.exception("Unexpected optional backup failure for %s", replay_id)
+            finally:
+                with self._lock:
+                    self._backups_in_progress.discard(replay_id)
+
+        thread = threading.Thread(target=worker, name=f"sigit-backup-{replay_id}", daemon=True)
+        try:
+            thread.start()
+        except Exception as exc:
+            error = str(exc) or type(exc).__name__
+            with self._lock:
+                self._backups_in_progress.discard(replay_id)
+            self._set_backup_status(replay_id, "failed", error)
+            LOGGER.error("Optional backup could not start for %s: %s", replay_id, error)
+            return "failed"
+        return "pending"
+
+    def _set_backup_status(self, replay_id: str, status: str, error: str | None) -> None:
+        with self._lock:
+            media = self._media_path(replay_id)
+            if not media.is_file():
+                return
+            record = self._load_record(media)
+            record["backup_status"] = status
+            record["backup_error"] = error
+            self._write_record(record)
 
     def update_metadata(self, replay_id: str, payload: dict[str, object]) -> dict[str, object]:
         allowed = {"title", "notes", "tags", "favorite"}
